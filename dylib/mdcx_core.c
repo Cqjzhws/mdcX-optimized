@@ -29,16 +29,7 @@
 
 #define MDCX_CORE_VERSION "2.3.0"
 
-/* mach_vm_* 变体无需 MIG stub 声明（头文件已提供原型），这里防御性兜底 */
-#if !defined(MACH_VM_BEHAVIOR_SET_DECL)
-extern kern_return_t mach_vm_behavior_set(mach_port_name_t target,
-                                          mach_vm_address_t address,
-                                          mach_vm_size_t size,
-                                          vm_behavior_t behavior);
-extern kern_return_t mach_vm_deallocate(mach_port_name_t target,
-                                        mach_vm_address_t address,
-                                        mach_vm_size_t size);
-#endif
+/* mach_vm_behavior_set / mach_vm_deallocate 的原型由 <mach/mach_vm.h> 提供 */
 
 __attribute__((visibility("default")))
 const char *mdcx_core_version(void) {
