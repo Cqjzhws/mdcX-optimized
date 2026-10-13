@@ -1,0 +1,109 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build IPA
+        id: build
+        run: |
+          cd mdcX
+          SCHEME="mdcX"
+          CONFIGURATION="Release"
+          SDK="iphoneos"
+          PROVISIONING="Automatic"
+          CODE_SIGN_IDENTITY="-"
+
+          xcodebuild \
+            -project mdcX.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -sdk "$SDK" \
+            -destination generic/platform=iOS \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]="" \
+            ONLY_ACTIVE_ARCH=NO \
+            -archivePath build/mdcX.xcarchive \
+            archive 2>&1 | tee build.log || { cat build.log; exit 1; }
+
+          # Export as unsigned IPA
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string></string>
+            <key>provisioningProfiles</key>
+            <dict/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/mdcX.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist build/ExportOptions.plist \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee export.log || { cat export.log; exit 1; }
+
+          IPA_PATH=$(find build/ipa -name "*.ipa" | head -1)
+          echo "IPA=$IPA_PATH" >> $GITHUB_OUTPUT
+
+      - name: Upload IPA artifact
+        if: steps.build.outputs.IPA != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdcX-Max-2.2.0
+          path: ${{ steps.build.outputs.IPA }}
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: steps.build.outputs.IPA != '' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.2.0
+          name: mdcX Max v2.2.0 (Optimized)
+          body: |
+            ## mdcX Max v2.2.0 - Performance Optimized Build
+            
+            ### ✨ Improvements in this build:
+            - **All-speed animations**: Button/transition animations reduced from 0.15-0.3s → 0.08s
+            - **Premium UI**: Continuous corners, gradient highlights, dynamic shadows on buttons
+            - **Dark theme**: Full dark-mode styling across all views
+            - **Terminal-style log view**: Black monospace console aesthetic
+            - **Category-colored icons & status badges**: Per-category gradient glyphs and pill status
+            - **New premium app icon**: Magic wand with sparkle gradient
+            - **Performance**: `.scrollContentBackground(.hidden)`, `.navigationViewStyle(.stack)`
+            
+            ⚠️ **Unsigned IPA** — use Sideloadly/AltStore/TrollStore to install
+          files: ${{ steps.build.outputs.IPA }}
