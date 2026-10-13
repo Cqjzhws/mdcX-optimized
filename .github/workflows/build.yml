@@ -40,7 +40,7 @@ jobs:
             CLEAN_BUILD_FOLDER=YES \
             archive 2>&1 | tee build.log
 
-          if ! grep -q "BUILD SUCCEEDED" build.log; then
+          if ! grep -q "ARCHIVE SUCCEEDED" build.log; then
             echo "Archive FAILED"
             tail -100 build.log
             exit 1
