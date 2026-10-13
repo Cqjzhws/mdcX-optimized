@@ -1,0 +1,83 @@
+name: Publish Release from Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build run id whose artifacts should be published"
+        required: true
+        default: "38445378332"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcX-Max-2.3.0-IPA
+          path: artifacts/ipa
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download dylib artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcXCore-2.3.0-dylib
+          path: artifacts/dylib
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcX-Max-2.3.0-bundle
+          path: artifacts/bundle
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Inspect
+        run: |
+          find artifacts -type f -print0 | xargs -0 ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.3.0-max
+          name: "mdcX Max v2.3.0 (Feature + Performance + UI)"
+          files: |
+            artifacts/ipa/*.ipa
+            artifacts/dylib/*.dylib
+            artifacts/bundle/*.zip
+          body: |
+            ## mdcX Max v2.3.0 — 功能增强 · 性能优化 · 界面重做
+
+            ### 新增功能
+            - **25 个定制项**：原 16 项全部保留，新增支付/邮件/通话/拨号键盘等 9 组系统音静音与控制中心、海报背景等视觉项
+            - **自动备份与一键还原**：应用前自动备份原始文件，支持单项长按恢复 / 工具箱全部还原（覆盖写原语）
+            - **搜索 + 分类筛选 + 收藏**，状态记录本地持久化
+            - **一键推荐优化 / 一键全部静音 / 批量执行**
+            - **工具箱**：兼容性检测、设备信息、root 快捷操作（Respring / backboardd / cfprefsd）、备份管理
+            - **分辨率模块扩充到 8 个机型预设**（含 iPhone 16 Pro Max 1320×2868）
+            - **mdcXCore.dylib**：独立 arm64 核心库，可注入 / dlopen
+
+            ### 性能优化
+            - 文件操作信号量限流（4 并发），批量执行不再冲击内存
+            - 目标文件存在性预检（不存在按 Skipped 计）
+            - 日志环形缓冲 + 150ms 合并发布，杜绝列表卡顿
+            - 能力探测结果缓存、注册表静态化、Release 静默 NSLog
+
+            ### 界面美化
+            - 深色玻璃拟态 + 6 套主题渐变强调色
+            - Hero 状态卡（零页/root 兼容状态 + 会话统计）
+            - 全新卡片列表、终端日志控制台（级别配色 / 复制 / 自动滚动开关）
+            - 全局动画速度三档（极速 0.06s 起）
+
+            ⚠️ 未签名，需 TrollStore / AltStore / Sideloadly 安装。
