@@ -32,8 +32,11 @@ enum DeviceInfo {
 
         var sysinfo = utsname()
         uname(&sysinfo)
-        let machine = withUnsafePointer(to: &sysinfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: sysinfo.machine)) {
+        // 先复制元组，避免 withUnsafePointer 对同一存储的排他访问冲突
+        var machineTuple = sysinfo.machine
+        let machineCapacity = MemoryLayout.size(ofValue: machineTuple)
+        let machine = withUnsafePointer(to: &machineTuple) {
+            $0.withMemoryRebound(to: CChar.self, capacity: machineCapacity) {
                 String(validatingUTF8: $0) ?? "unknown"
             }
         }
