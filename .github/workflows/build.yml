@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,33 +18,35 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Build IPA
+      - name: Build & Archive
         id: build
         run: |
           cd mdcX
           SCHEME="mdcX"
-          CONFIGURATION="Release"
-          SDK="iphoneos"
-          PROVISIONING="Automatic"
-          CODE_SIGN_IDENTITY="-"
 
           xcodebuild \
             -project mdcX.xcodeproj \
             -scheme "$SCHEME" \
-            -configuration "$CONFIGURATION" \
-            -sdk "$SDK" \
-            -destination generic/platform=iOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/mdcX.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]="" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            ENABLE_SANDBOX=NO \
             ONLY_ACTIVE_ARCH=NO \
-            -archivePath build/mdcX.xcarchive \
-            archive 2>&1 | tee build.log || { cat build.log; exit 1; }
+            CLEAN_BUILD_FOLDER=YES \
+            archive 2>&1 | tee build.log
 
-          # Export as unsigned IPA
-          cat > build/ExportOptions.plist <<PLIST
+          if ! grep -q "BUILD SUCCEEDED" build.log; then
+            echo "Archive FAILED"
+            tail -100 build.log
+            exit 1
+          fi
+
+          cat > build/ExportOptions.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -74,36 +76,46 @@ jobs:
             -archivePath build/mdcX.xcarchive \
             -exportPath build/ipa \
             -exportOptionsPlist build/ExportOptions.plist \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | tee export.log || { cat export.log; exit 1; }
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO 2>&1 | tee export.log
 
           IPA_PATH=$(find build/ipa -name "*.ipa" | head -1)
-          echo "IPA=$IPA_PATH" >> $GITHUB_OUTPUT
+          if [ -z "$IPA_PATH" ]; then
+            echo "No IPA generated"
+            tail -50 export.log
+            exit 1
+          fi
 
-      - name: Upload IPA artifact
+          echo "IPA=$IPA_PATH" >> $GITHUB_OUTPUT
+          echo "Generated: $IPA_PATH"
+          ls -la "$IPA_PATH"
+
+      - name: Upload artifact
         if: steps.build.outputs.IPA != ''
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.2.0
+          name: mdcX-Max-2.2.0-optimized
           path: ${{ steps.build.outputs.IPA }}
           retention-days: 30
 
       - name: Create GitHub Release
-        if: steps.build.outputs.IPA != '' && github.event_name == 'push'
+        if: steps.build.outputs.IPA != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.2.0
-          name: mdcX Max v2.2.0 (Optimized)
+          tag_name: v2.2.0-optimized
+          name: "mdcX Max v2.2.0 (Performance Optimized)"
           body: |
-            ## mdcX Max v2.2.0 - Performance Optimized Build
+            ## mdcX Max v2.2.0 - 性能优化构建
+
+            ✨ **优化亮点**：
+            - **全速动画**：按钮/过渡动画从 0.15~0.3s 降至 **0.08s**
+            - **高级 UI**：continuous 圆角、渐变高光、动态阴影
+            - **深色主题**：全界面深色模式
+            - **终端风格日志**：黑色等宽字体控制台
+            - **分类彩色图标**：per-category 渐变图标徽章
+            - **新高级图标**：魔法棒 + 星尘渐变
+            - **性能优化**：隐藏列表背景、stack navigation
             
-            ### ✨ Improvements in this build:
-            - **All-speed animations**: Button/transition animations reduced from 0.15-0.3s → 0.08s
-            - **Premium UI**: Continuous corners, gradient highlights, dynamic shadows on buttons
-            - **Dark theme**: Full dark-mode styling across all views
-            - **Terminal-style log view**: Black monospace console aesthetic
-            - **Category-colored icons & status badges**: Per-category gradient glyphs and pill status
-            - **New premium app icon**: Magic wand with sparkle gradient
-            - **Performance**: `.scrollContentBackground(.hidden)`, `.navigationViewStyle(.stack)`
-            
-            ⚠️ **Unsigned IPA** — use Sideloadly/AltStore/TrollStore to install
+            ⚠️ 未签名 IPA，需 AltStore / Sideloadly / TrollStore 安装
           files: ${{ steps.build.outputs.IPA }}
