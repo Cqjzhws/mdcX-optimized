@@ -5,9 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: mdcx-build-main
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 45
     steps:
       - name: Checkout
