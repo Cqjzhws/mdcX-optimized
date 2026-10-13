@@ -39,7 +39,7 @@ struct LogView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     Text(logMessages.isEmpty ? "Ready" : logMessages)
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundColor(logMessages.isEmpty ? .tertiary : Color(red: 0.85, green: 0.85, blue: 0.9))
+                        .foregroundColor(logMessages.isEmpty ? Color.gray.opacity(0.4) : Color(red: 0.85, green: 0.85, blue: 0.9))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .id("logEnd_ID_LogView")
                         .padding(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10))
