@@ -30,7 +30,7 @@ struct LogView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 13))
-                        .foregroundColor(.tertiary)
+                        .foregroundColor(Color.gray.opacity(0.5))
                 }
                 .buttonStyle(.plain)
             }
