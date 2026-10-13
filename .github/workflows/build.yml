@@ -46,50 +46,28 @@ jobs:
             exit 1
           fi
 
-          cat > build/ExportOptions.plist <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>development</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>teamID</key>
-            <string></string>
-            <key>provisioningProfiles</key>
-            <dict/>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>uploadBitcode</key>
-            <false/>
-            <key>uploadSymbols</key>
-            <false/>
-            <key>compileBitcode</key>
-            <false/>
-          </dict>
-          </plist>
-          PLIST
+          echo "Archive OK. Packing IPA manually..."
 
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/mdcX.xcarchive \
-            -exportPath build/ipa \
-            -exportOptionsPlist build/ExportOptions.plist \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO 2>&1 | tee export.log
-
-          IPA_PATH=$(find build/ipa -name "*.ipa" | head -1)
-          if [ -z "$IPA_PATH" ]; then
-            echo "No IPA generated"
-            tail -50 export.log
+          # Manually create IPA from xcarchive (Payload/<App>.app structure)
+          APP_PATH=$(find build/mdcX.xcarchive/Products/Applications -name "*.app" -maxdepth 1 -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found in archive"
+            ls -la build/mdcX.xcarchive/Products/Applications/ || echo "No Applications dir"
             exit 1
           fi
 
+          echo "Found app: $APP_PATH"
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          cd build/ipa
+          IPA_NAME="mdcX_Max_v2.2.0_optimized.ipa"
+          zip -r "$IPA_NAME" Payload -x "*.DS_Store"
+          ls -la "$IPA_NAME"
+          IPA_PATH="$(pwd)/$IPA_NAME"
+          cd ../..
+
           echo "IPA=$IPA_PATH" >> $GITHUB_OUTPUT
-          echo "Generated: $IPA_PATH"
-          ls -la "$IPA_PATH"
+          echo "Generated unsigned IPA: $IPA_PATH"
 
       - name: Upload artifact
         if: steps.build.outputs.IPA != ''
