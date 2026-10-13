@@ -1,31 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "mdcx_icon.jpg",
-      "idiom" : "universal",
-      "platform" : "ios",
-      "size" : "1024x1024"
-    },
-    {
-      "appearances" : [
-        {
-          "appearance" : "luminosity",
-          "value" : "dark"
-        }
-      ],
-      "filename" : "mdcx_icon.jpg",
-      "idiom" : "universal",
-      "platform" : "ios",
-      "size" : "1024x1024"
-    },
-    {
-      "appearances" : [
-        {
-          "appearance" : "luminosity",
-          "value" : "tinted"
-        }
-      ],
-      "filename" : "mdcx_icon.jpg",
+      "filename" : "mdcX.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
