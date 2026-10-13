@@ -324,7 +324,6 @@ struct ContentView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
                 
                 LogView(logMessages: $logStore.messages, logStore: logStore)
                     .padding(.horizontal, 16)
