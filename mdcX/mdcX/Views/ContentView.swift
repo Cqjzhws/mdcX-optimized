@@ -1,462 +1,494 @@
 //
 //  ContentView.swift
-//  mdcX
+//  mdcX Max
 //
-//  Created by 이지안 on 5/9/25.
+//  2.3.0 - 全新主界面：
+//  Hero 渐变状态卡 / 搜索 / 分类与收藏筛选 / 会话统计 /
+//  一键推荐优化 / 批量静音 / 单项备份恢复（长按）/ 终端日志
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
-    @State private var tweaks: [Tweak] = [
-        Tweak(name: "Hide Dock",
-              description: "Makes the dock background transparent.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/CoreMaterial.framework/dockDark.materialrecipe",
-                "/System/Library/PrivateFrameworks/CoreMaterial.framework/dockLight.materialrecipe"
-              ]),
-              category: "Dock", status: "", isProcessing: false),
-        
-        Tweak(name: "Modify SpringBoard Shelf BG",
-              description: "Attempts to alter a 'shelf' background material within SpringBoard. Likely affects the Dock or iPad App Shelf. Requires respring.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/SpringBoard.framework/shelfBackground.materialrecipe"
-              ]),
-              category: "Dock",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Remove Spotlight Bottom Blur",
-              description: "Attempts to remove a blur effect at the bottom of the Spotlight search interface. Requires respring.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/SpotlightUIInternal.framework/bottomBlur.materialrecipe"
-              ]),
-              category: "Spotlight",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Transparent UI Elements",
-              description: "Makes notifications, media player backgrounds transparent.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/CoreMaterial.framework/platterStrokeLight.visualstyleset",
-                "/System/Library/PrivateFrameworks/CoreMaterial.framework/platterStrokeDark.visualstyleset",
-                "/System/Library/PrivateFrameworks/CoreMaterial.framework/plattersDark.materialrecipe",
-                "/System/Library/PrivateFrameworks/SpringBoardHome.framework/folderLight.materialrecipe",
-                "/System/Library/PrivateFrameworks/SpringBoardHome.framework/folderDark.materialrecipe",
-                "/System/Library/PrivateFrameworks/CoreMaterial.framework/platters.materialrecipe"
-              ]),
-              category: "UI Elements", status: "", isProcessing: false),
-        
-        Tweak(name: "Transparent Notification Avatars",
-              description: "Attempts to make the background behind app icons in notifications transparent. Affects light/dark modes. Requires respring.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/UserNotificationsUIKit.framework/avatarBackground.materialrecipe",
-                "/System/Library/PrivateFrameworks/UserNotificationsUIKit.framework/avatarBackgroundDark.materialrecipe"
-              ]),
-              category: "Notifications",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Hide Folder Backgrounds",
-              description: "Makes Home Screen folder backgrounds transparent.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/SpringBoardHome.framework/folderDark.materialrecipe",
-                "/System/Library/PrivateFrameworks/SpringBoardHome.framework/folderLight.materialrecipe"
-              ]),
-              category: "UI Elements", status: "", isProcessing: false),
-        
-        Tweak(name: "Remove Home Screen Edit Overlay",
-              description: "Attempts to remove/alter the overlay (e.g., dimming) when editing the Home Screen (jiggle mode). Requires respring.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/SpringBoardHome.framework/homeScreenOverlay.materialrecipe"
-              ]),
-              category: "UI Elements",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Remove App Switcher Blur",
-              description: "Attempts to remove the background blur in the App Switcher.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/SpringBoard.framework/homeScreenBackdrop-application.materialrecipe",
-                "/System/Library/PrivateFrameworks/SpringBoard.framework/homeScreenBackdrop-switcher.materialrecipe"
-              ]),
-              category: "UI Elements", status: "", isProcessing: false),
-        
-        Tweak(name: "Remove Spotlight Blur",
-              description: "Attempts to remove the background blur in Spotlight search (Home Screen). Requires respring.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/PrivateFrameworks/SpringBoard.framework/spotlightBlurBackground.materialrecipe",
-                "/System/Library/PrivateFrameworks/SpringBoard.framework/spotlightLumSatBackground.materialrecipe"
-              ]),
-              category: "UI Elements", 
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Hide Home Bar",
-              description: "Attempts to hide the home indicator bar.",
-              action: .zeroOutFiles(paths: ["/System/Library/PrivateFrameworks/MaterialKit.framework/Assets.car"]),
-              category: "UI Elements", status: "", isProcessing: false),
-        
-        Tweak(name: "Hide Lockscreen Shortcuts",
-              description: "Hides flashlight and camera buttons on lockscreen.",
-              action: .zeroOutFiles(paths: ["/System/Library/PrivateFrameworks/CoverSheet.framework/Assets.car"]),
-              category: "Lockscreen", status: "", isProcessing: false),
-        
-        Tweak(name: "Silence Charging Sound",
-              description: "Attempts to disable the charging connection sound by targeting common and device-specific sound files.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/Audio/UISounds/connect_power.caf",
-              ]),
-              category: "Sounds",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Silence Lock Sound",
-              description: "Disables the sound when locking the device.",
-              action: .zeroOutFiles(paths: ["/System/Library/Audio/UISounds/lock.caf"]),
-              category: "Sounds",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Silence Video Record Sounds",
-              description: "Disables sounds when video recording starts/ends.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/Audio/UISounds/begin_record.caf",
-                "/System/Library/Audio/UISounds/end_record.caf"
-              ]),
-              category: "Sounds",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Silence Photo Shutter Sounds",
-              description: "Disables camera shutter sounds for photos & bursts.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/Audio/UISounds/photoShutter.caf",
-                "/System/Library/Audio/UISounds/Modern/camera_shutter_burst.caf",
-                "/System/Library/Audio/UISounds/Modern/camera_shutter_burst_begin.caf",
-                "/System/Library/Audio/UISounds/Modern/camera_shutter_burst_end.caf",
-                "/System/Library/Audio/UISounds/nano/CameraShutter_Haptic.caf"
-              ]),
-              category: "Sounds",
-              status: "",
-              isProcessing: false),
-        
-        Tweak(name: "Silence Keyboard Sounds",
-              description: "Disables keyboard tap sounds.",
-              action: .zeroOutFiles(paths: [
-                "/System/Library/Audio/UISounds/key_press_click.caf",
-                "/System/Library/Audio/UISounds/key_press_delete.caf",
-                "/System/Library/Audio/UISounds/key_press_modifier.caf",
-                "/System/Library/Audio/UISounds/keyboard_press_clear.caf",
-                "/System/Library/Audio/UISounds/keyboard_press_delete.caf",
-                "/System/Library/Audio/UISounds/keyboard_press_normal.caf"
-              ]),
-              category: "Sounds",
-              status: "",
-              isProcessing: false)
-    ]
     @ObservedObject var logStore: LogStore
+    @ObservedObject private var settings = AppSettings.shared
     var onBusyChange: (Bool) -> Void = { _ in }
 
-    @State private var isAnyTweakProcessing: Bool = false
-    @State private var isRespringProcessing: Bool = false
+    // 注册表是 let，拷贝一份作为可变运行时状态
+    @State private var tweaks: [Tweak] = TweakRegistry.all
+    @State private var searchText: String = ""
+    @State private var activeFilter: String = "__all__"
+    @State private var isAnyProcessing = false
+    @State private var isRespringProcessing = false
+    @State private var batchTitle: String = ""
     @State private var alertItem: AlertItem?
-    
+
+    // 会话级文件统计
+    @State private var sessionOK = 0
+    @State private var sessionFail = 0
+
     private let exploitManager = ExploitManager.shared
-    
-    private var groupedTweaks: [String: [Tweak]] {
-        Dictionary(grouping: tweaks, by: { $0.category })
+
+    private var theme: AppTheme { settings.theme }
+    private var anyBusy: Bool { isAnyProcessing || isRespringProcessing }
+
+    // MARK: 过滤
+
+    private var filteredCategoryKeys: [String] {
+        var keys: [String] = []
+        for t in filteredTweaks where !keys.contains(t.category) {
+            keys.append(t.category)
+        }
+        return TweakRegistry.categories.map { $0.key }.filter { keys.contains($0) }
     }
-    
-    private var sortedCategoryKeys: [String] {
-        groupedTweaks.keys.sorted()
+
+    private var filteredTweaks: [Tweak] {
+        let kw = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        return tweaks.filter { t in
+            let matchFilter: Bool = {
+                if activeFilter == "__all__" { return true }
+                if activeFilter == "__fav__" { return settings.isFavorite(t.tid) }
+                return t.category == activeFilter
+            }()
+            guard matchFilter else { return false }
+            guard !kw.isEmpty else { return true }
+            return t.name.lowercased().contains(kw)
+                || (t.description?.lowercased().contains(kw) ?? false)
+                || t.category.lowercased().contains(kw)
+        }
     }
-    
-    private func applyTweak(id: UUID) {
-        guard let tweakIndex = tweaks.firstIndex(where: { $0.id == id }) else {
-            logStore.append(message: "Error: Tweak with ID \(id) not found.")
+
+    private var indicesByCategory: [String: [Int]] {
+        var dict: [String: [Int]] = [:]
+        let visible = Set(filteredTweaks.map { $0.tid })
+        for (i, t) in tweaks.enumerated() where visible.contains(t.tid) {
+            dict[t.category, default: []].append(i)
+        }
+        return dict
+    }
+
+    // MARK: 单项应用
+
+    private func applyTweak(at index: Int) {
+        guard !anyBusy, !tweaks[index].isProcessing else {
+            logStore.append("已有操作正在进行，请稍候", level: .warn)
             return
         }
-        guard !tweaks[tweakIndex].isProcessing && !isAnyTweakProcessing && !isRespringProcessing else {
-            logStore.append(message: "Operation already in progress for \(tweaks[tweakIndex].name) or another task.")
-            return
-        }
-        
-        tweaks[tweakIndex].isProcessing = true
-        tweaks[tweakIndex].status = "Processing..."
-        exploitManager.logStore = self.logStore
+        tweaks[index].isProcessing = true
+        tweaks[index].state = .processing
+        tweaks[index].status = "处理中…"
+        exploitManager.logStore = logStore
         onBusyChange(true)
 
-        exploitManager.applyFileZeroTweak(tweaks[tweakIndex],
-                                          zeroAllFilePages: false) { successCount, totalFiles, resultsLog in
-            if let updatedTweakIndex = self.tweaks.firstIndex(where: { $0.id == id }) {
-                self.tweaks[updatedTweakIndex].status = "\(successCount)/\(totalFiles) Succeeded"
-                if !resultsLog.isEmpty {
-                    self.logStore.append(message: "Results for '\(self.tweaks[updatedTweakIndex].name)':\n\(resultsLog)")
-                }
-                self.tweaks[updatedTweakIndex].isProcessing = false
-            }
-            self.onBusyChange(false)
+        let tweak = tweaks[index]
+        exploitManager.applyFileZeroTweak(tweak) { result in
+            finishOne(index: index, tid: tweak.tid, result: result)
+            onBusyChange(false)
         }
     }
-    
-    private func applyAllTweaks() {
-        guard !isAnyTweakProcessing && !isRespringProcessing && !tweaks.contains(where: { $0.isProcessing }) else {
-            logStore.append(message: "Operation already in progress.")
-            return
-        }
-        
-        logStore.append(message: "Starting all PoC file-zero tweaks...")
-        isAnyTweakProcessing = true
+
+    private func restoreTweak(at index: Int) {
+        guard !anyBusy else { return }
+        let tweak = tweaks[index]
+        logStore.append("准备恢复「\(tweak.name)」…")
         onBusyChange(true)
-        exploitManager.logStore = self.logStore
-
-        let group = DispatchGroup()
-        let summaryLock = NSLock()
-        var summary = ""
-
-        for i in tweaks.indices {
-            if tweaks[i].isProcessing { continue }
-            tweaks[i].isProcessing = true
-            tweaks[i].status = "Batching..."
-
-            group.enter()
-            exploitManager.applyFileZeroTweak(tweaks[i],
-                                              zeroAllFilePages: false) { successCount, totalFiles, _ in
-                DispatchQueue.main.async {
-                    defer { group.leave() }
-                    guard self.tweaks.indices.contains(i) else { return }
-
-                    self.tweaks[i].status = "Batch: \(successCount)/\(totalFiles) OK"
-                    let line = "\(self.tweaks[i].name): \(self.tweaks[i].status)\n"
-
-                    summaryLock.lock()
-                    summary += line
-                    summaryLock.unlock()
-
-                    self.tweaks[i].isProcessing = false
-                }
+        isAnyProcessing = true
+        exploitManager.logStore = logStore
+        exploitManager.restoreTweak(tweak) { outcome in
+            self.isAnyProcessing = false
+            self.onBusyChange(false)
+            if outcome.restored > 0 {
+                self.tweaks[index].state = .succeeded
+                self.tweaks[index].status = "已恢复 \(outcome.restored)"
+                self.logStore.append("恢复成功，建议执行一次 Respring", level: .success)
+            } else if outcome.failed > 0 {
+                self.tweaks[index].state = .failed
+                self.tweaks[index].status = "恢复失败"
+                self.logStore.append("恢复失败：零页写回未成功（确认设备处于 iOS 14.0–16.1.2 且文件仍存在）", level: .error)
+            } else {
+                self.logStore.append("没有可恢复的文件", level: .warn)
             }
         }
+    }
 
-        group.notify(queue: .main) {
-            summaryLock.lock()
-            let finalSummary = summary
-            summaryLock.unlock()
+    private func finishOne(index: Int, tid: String, result: BatchResult) {
+        guard tweaks.indices.contains(index) else { return }
+        sessionOK += result.succeeded
+        sessionFail += result.failed
+        tweaks[index].isProcessing = false
 
-            self.logStore.append(message: "All tweaks batch completed.\nSummary:\n\(finalSummary)")
-            self.isAnyTweakProcessing = false
-            self.onBusyChange(false)
+        if result.succeeded > 0 && result.failed == 0 {
+            tweaks[index].state = .succeeded
+            tweaks[index].status = "\(result.succeeded)/\(result.total) 成功"
+            settings.markApplied([tid])
+        } else if result.succeeded > 0 && result.failed > 0 {
+            tweaks[index].state = .partial
+            tweaks[index].status = "\(result.succeeded) 成功 · \(result.failed) 失败"
+            settings.markApplied([tid])
+        } else if result.succeeded == 0 && result.failed == 0 && result.skipped > 0 {
+            tweaks[index].state = .skipped
+            tweaks[index].status = "全部跳过"
+        } else {
+            tweaks[index].state = .failed
+            tweaks[index].status = "失败"
         }
     }
-    
+
+    // MARK: 批量
+
+    private func runBatch(_ targets: [Tweak], title: String) {
+        guard !anyBusy, !targets.isEmpty else { return }
+        logStore.append("开始批量执行：\(title)（\(targets.count) 项）", level: .info)
+        isAnyProcessing = true
+        batchTitle = title
+        onBusyChange(true)
+        exploitManager.logStore = logStore
+
+        exploitManager.applyBatch(targets, progress: { idx, _, tweak in
+            if let i = tweaks.firstIndex(where: { $0.tid == tweak.tid }) {
+                tweaks[i].isProcessing = true
+                tweaks[i].state = .processing
+                tweaks[i].status = "队列 \(idx + 1)/\(targets.count)"
+            }
+        }) { results in
+            var okTids: [String] = []
+            for (tid, r) in results {
+                guard let i = tweaks.firstIndex(where: { $0.tid == tid }) else { continue }
+                sessionOK += r.succeeded
+                sessionFail += r.failed
+                tweaks[i].isProcessing = false
+                if r.succeeded > 0 && r.failed == 0 {
+                    tweaks[i].state = .succeeded
+                    tweaks[i].status = "\(r.succeeded)/\(r.total) 成功"
+                    okTids.append(tid)
+                } else if r.succeeded > 0 {
+                    tweaks[i].state = .partial
+                    tweaks[i].status = "\(r.succeeded) 成功 · \(r.failed) 失败"
+                    okTids.append(tid)
+                } else if r.skipped > 0 {
+                    tweaks[i].state = .skipped
+                    tweaks[i].status = "全部跳过"
+                } else {
+                    tweaks[i].state = .failed
+                    tweaks[i].status = "失败"
+                }
+            }
+            settings.markApplied(okTids)
+            isAnyProcessing = false
+            onBusyChange(false)
+            let totalOK = results.values.reduce(0) { $0 + $1.succeeded }
+            let totalFail = results.values.reduce(0) { $0 + $1.failed }
+            logStore.append("批量「\(title)」结束：文件成功 \(totalOK)，失败 \(totalFail)。建议执行 Respring 生效。",
+                            level: totalFail == 0 ? .success : .warn)
+        }
+    }
+
+    private var recommendedTweaks: [Tweak] { tweaks.filter { $0.recommended } }
+    private var soundTweaks: [Tweak] { tweaks.filter { $0.category == "Sounds" } }
+
+    // MARK: Respring
+
     private func triggerRespring() {
-        guard !isRespringProcessing && !isAnyTweakProcessing && !tweaks.contains(where: {$0.isProcessing}) else {
-            logStore.append(message: "Another operation is already in progress.")
-            return
-        }
+        guard !anyBusy else { return }
         isRespringProcessing = true
         onBusyChange(true)
 
         if RootProc.hasPackagedHelper {
-            logStore.append(message: "Respring：通过包内 killall（root 授权）重启 cfprefsd / backboardd …")
-
+            logStore.append("通过包内 killall（root）重启 cfprefsd / backboardd …")
             DispatchQueue.global(qos: .userInitiated).async {
                 let ok = RootProc.respring()
-
                 DispatchQueue.main.async {
                     if ok {
-                        self.logStore.append(message: "Respring 已执行。")
+                        logStore.append("Respring 已执行", level: .success)
                     } else {
-                        self.logStore.append(message: "包内 killall 执行失败，改用 CFNotification 方案 …")
+                        logStore.append("包内 killall 执行失败，尝试 CFNotification 方案…", level: .warn)
                         RespringHelper.attemptDarwinRespring()
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                        self.isRespringProcessing = false
-                        self.onBusyChange(false)
+                        isRespringProcessing = false
+                        onBusyChange(false)
                     }
                 }
             }
         } else {
-            logStore.append(message: "未找到包内 killall，退回 CFNotification 方案（在部分 iOS 版本上无效）。")
-
+            logStore.append("未找到包内 killall，尝试 CFNotification 方案（部分版本无效）", level: .warn)
             DispatchQueue.global(qos: .userInitiated).async {
                 RespringHelper.attemptDarwinRespring()
-
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                    self.logStore.append(message: "CFNotification 已发送。若界面未重启，说明该方式在当前 iOS 版本无效。")
-                    self.isRespringProcessing = false
-                    self.onBusyChange(false)
+                    logStore.append("CFNotification 已发送", level: .info)
+                    isRespringProcessing = false
+                    onBusyChange(false)
                 }
             }
         }
     }
-    
+
+    // MARK: Body
+
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                headerBar
-                
-                List {
-                    ForEach(sortedCategoryKeys, id: \.self) { categoryKey in
-                        Section {
-                            let indicesForCategory = tweaks.indices.filter { tweaks[$0].category == categoryKey }
-                            ForEach(indicesForCategory, id: \.self) { indexInMainArray in
-                                TweakRowView(
-                                    tweak: $tweaks[indexInMainArray],
-                                    isGloballyProcessing: $isAnyTweakProcessing,
-                                    action: {
-                                        self.applyTweak(id: tweaks[indexInMainArray].id)
-                                    }
-                                )
-                            }
-                        } header: {
-                            categoryHeader(for: categoryKey)
-                        } footer: {
-                            if categoryKey == sortedCategoryKeys.last {
-                                Text("Manual respring/reboot required for changes to take effect. Use with caution.")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                            }
+        VStack(spacing: 0) {
+            heroCard
+
+            searchBar
+            filterChips
+
+            tweakList
+
+            LogView(logStore: logStore)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+                .padding(.bottom, 9)
+        }
+        .background(Color(red: 0.027, green: 0.027, blue: 0.045).ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    alertItem = AlertItem(
+                        title: Text("确认 Respring"),
+                        message: Text(RootProc.hasPackagedHelper
+                                      ? "将以 root 权限重启 cfprefsd 与 backboardd，界面会重新加载。"
+                                      : "未找到包内 killall，将使用 CFNotification 方案，在部分 iOS 版本上可能无效。"),
+                        primaryButton: .destructive(Text("Respring")) { triggerRespring() },
+                        secondaryButton: .cancel())
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(theme.primary)
+                        .rotationEffect(.degrees(isRespringProcessing ? 360 : 0))
+                        .animation(.linear(duration: 1).repeatForever(autoreverses: false),
+                                   value: isRespringProcessing)
+                }
+                .disabled(anyBusy)
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        runBatch(recommendedTweaks, title: "一键推荐优化")
+                    } label: {
+                        Label("一键推荐优化（\(recommendedTweaks.count) 项）", systemImage: "sparkles")
+                    }
+                    Button {
+                        runBatch(soundTweaks, title: "全部系统音静音")
+                    } label: {
+                        Label("全部系统音静音（\(soundTweaks.count) 项）", systemImage: "speaker.slash.fill")
+                    }
+                    Button {
+                        runBatch(filteredTweaks, title: "应用当前筛选结果")
+                    } label: {
+                        Label("应用当前筛选（\(filteredTweaks.count) 项）", systemImage: "square.stack.3d.up.fill")
+                    }
+                    Button(role: .destructive) {
+                        runBatch(tweaks, title: "应用全部 \(tweaks.count) 项")
+                    } label: {
+                        Label("应用全部（\(tweaks.count) 项）", systemImage: "bolt.fill")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if isAnyProcessing {
+                            ProgressView().scaleEffect(0.65)
                         }
+                        Text(isAnyProcessing ? batchTitle.isEmpty ? "执行中" : batchTitle : "批量")
+                            .font(.system(size: 13, weight: .bold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(theme.gradient))
+                    .shadow(color: theme.glow.opacity(0.4), radius: 6, y: 3)
+                }
+                .disabled(anyBusy)
+                .opacity(anyBusy ? 0.55 : 1)
+            }
+        }
+        .alert(item: $alertItem) { item in
+            Alert(title: item.title, message: item.message,
+                  primaryButton: item.primaryButton, secondaryButton: item.secondaryButton ?? .cancel())
+        }
+        .onAppear { exploitManager.logStore = logStore }
+    }
+
+    // MARK: Hero
+
+    private var heroCard: some View {
+        let report = DeviceInfo.report()
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 11) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(theme.gradient)
+                        .shadow(color: theme.glow.opacity(0.5), radius: 10, y: 4)
+                    Image(systemName: "wand.and.stars.inverse")
+                        .font(.system(size: 20, weight: .black))
+                        .foregroundColor(.white)
+                }
+                .frame(width: 46, height: 46)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("mdcX Max")
+                        .font(.system(size: 21, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("iOS 视觉 / 声音定制控制台")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 7) {
+                statusDot(ok: report.zeroPageSupported,
+                          text: report.zeroPageSupported ? "零页利用可用" : "零页已修补")
+                statusDot(ok: RootProc.hasPackagedHelper, text: "Root Helper")
+                Spacer()
+                StatPill(icon: "checkmark", value: sessionOK, tint: .green)
+                StatPill(icon: "xmark", value: sessionFail, tint: .red)
+            }
+        }
+        .padding(15)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(colors: [theme.primary.opacity(0.20), theme.secondary.opacity(0.06)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(theme.primary.opacity(0.22), lineWidth: 0.8)
+                )
+        )
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    private func statusDot(ok: Bool, text: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(ok ? Color.green : Color.orange)
+                .frame(width: 7, height: 7)
+                .overlay(Circle().stroke(ok ? Color.green.opacity(0.4) : Color.orange.opacity(0.4), lineWidth: 3))
+            Text(text)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(.white.opacity(0.65))
+        }
+    }
+
+    // MARK: 搜索
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.35))
+            TextField("搜索功能、分类…", text: $searchText)
+                .font(.system(size: 13.5))
+                .foregroundColor(.white)
+                .disableAutocorrection(true)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.6))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 9)
+    }
+
+    // MARK: Chips
+
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                FilterChip(title: "全部", icon: "square.grid.2x2.fill",
+                           tint: theme.primary, isSelected: activeFilter == "__all__") {
+                    withAnimation(.easeOut(duration: settings.anim)) { activeFilter = "__all__" }
+                }
+                FilterChip(title: "收藏", icon: "star.fill",
+                           tint: .yellow, isSelected: activeFilter == "__fav__") {
+                    withAnimation(.easeOut(duration: settings.anim)) { activeFilter = "__fav__" }
+                }
+                ForEach(TweakRegistry.categories) { cat in
+                    FilterChip(title: cat.key, icon: cat.icon,
+                               tint: cat.color,
+                               isSelected: activeFilter == cat.key) {
+                        withAnimation(.easeOut(duration: settings.anim)) { activeFilter = cat.key }
                     }
                 }
-                .listStyle(.insetGrouped)
-                
-                LogView(logMessages: $logStore.messages, logStore: logStore)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
-                    .padding(.bottom, 8)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .navigationBarLeading) {
-                    respringButton
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
+        }
+    }
+
+    // MARK: List
+
+    private var tweakList: some View {
+        let groups = indicesByCategory
+        return List {
+            ForEach(filteredCategoryKeys, id: \.self) { key in
+                Section {
+                    if let idxs = groups[key] {
+                        ForEach(idxs, id: \.self) { i in
+                            TweakRowView(tweak: $tweaks[i],
+                                         isGloballyProcessing: isAnyProcessing,
+                                         onApply: { applyTweak(at: i) },
+                                         onRestore: { restoreTweak(at: i) })
+                                .listRowBackground(Color.white.opacity(0.045))
+                        }
+                    }
+                } header: {
+                    categoryHeader(key)
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    applyAllButton
+            }
+            if filteredTweaks.isEmpty {
+                Section {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 30))
+                            .foregroundColor(.white.opacity(0.25))
+                        Text(activeFilter == "__fav__" ? "还没有收藏项，点行内星标收藏" : "没有匹配的功能项")
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                    .padding(.vertical, 30)
+                    .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
                 }
-            }
-            .alert(item: $alertItem) { item in
-                Alert(title: item.title, message: item.message, primaryButton: item.primaryButton, secondaryButton: item.secondaryButton ?? .cancel())
-            }
-            .onAppear {
-                exploitManager.logStore = self.logStore
             }
         }
-        .navigationViewStyle(.stack)
-    }
-    
-    // MARK: - Header
-    
-    private var headerBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "wand.and.stars.inverse")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.purple, .blue, .cyan],
-                                       startPoint: .topLeading,
-                                       endPoint: .bottomTrailing)
-                    )
-                
-                Text("File Tweaker")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-            }
-            
-            Text("Customize iOS visual & audio elements")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+        .listStyle(.insetGrouped)
+        .background(Color.clear)
+        .onTapGesture {
+            // 点击列表空白处收起键盘
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
-    
-    // MARK: - Category Header
-    
-    private func categoryHeader(for category: String) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(categoryColor(category))
-                .frame(width: 6, height: 6)
+
+    private func categoryHeader(_ category: String) -> some View {
+        let meta = TweakRegistry.metadata(for: category)
+        return HStack(spacing: 6) {
+            Image(systemName: meta.icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(meta.color)
             Text(category)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 11.5, weight: .bold, design: .rounded))
                 .textCase(.uppercase)
-                .foregroundColor(.secondary)
+                .foregroundColor(.white.opacity(0.55))
         }
         .padding(.vertical, 2)
     }
-    
-    private func categoryColor(_ category: String) -> Color {
-        switch category {
-        case "Dock": return .cyan
-        case "UI Elements": return .indigo
-        case "Lockscreen": return .red
-        case "Sounds": return .pink
-        case "Spotlight": return .yellow
-        case "Notifications": return .orange
-        default: return .purple
-        }
-    }
-    
-    // MARK: - Toolbar Buttons
-    
-    private var respringButton: some View {
-        Button {
-            self.alertItem = AlertItem(
-                title: Text("确认 Respring"),
-                message: Text(RootProc.hasPackagedHelper
-                    ? "将以 root 权限重启 cfprefsd 与 backboardd，界面会重新加载。继续？"
-                    : "包内未找到 killall，将退回 CFNotification 方案，在部分 iOS 版本上可能无效。继续？"),
-                primaryButton: .destructive(Text("Respring")) {
-                    triggerRespring()
-                },
-                secondaryButton: .cancel()
-            )
-        } label: {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 16, weight: .semibold))
-        }
-        .disabled(isRespringProcessing || isAnyTweakProcessing || tweaks.contains(where: {$0.isProcessing}))
-        .animation(.easeOut(duration: 0.08), value: isRespringProcessing)
-    }
-    
-    private var applyAllButton: some View {
-        Button {
-            applyAllTweaks()
-        } label: {
-            HStack(spacing: 4) {
-                if isAnyTweakProcessing {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                }
-                Text(isAnyTweakProcessing ? "Processing" : "Apply All")
-                    .font(.system(size: 13, weight: .semibold))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(
-                        LinearGradient(colors: [.purple, .blue],
-                                       startPoint: .leading,
-                                       endPoint: .trailing)
-                    )
-            )
-            .foregroundColor(.white)
-            .shadow(color: .purple.opacity(0.4), radius: 6, x: 0, y: 3)
-        }
-        .disabled(isAnyTweakProcessing || isRespringProcessing || tweaks.contains(where: {$0.isProcessing}))
-        .opacity(isAnyTweakProcessing || isRespringProcessing || tweaks.contains(where: {$0.isProcessing}) ? 0.5 : 1.0)
-        .animation(.easeOut(duration: 0.08), value: isAnyTweakProcessing)
-    }
-}
-
-#Preview {
-    ContentView(logStore: LogStore())
 }

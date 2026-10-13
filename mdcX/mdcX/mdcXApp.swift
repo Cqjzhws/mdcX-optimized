@@ -1,46 +1,92 @@
 //
 //  mdcXApp.swift
-//  mdcX
+//  mdcX Max
 //
-//  Created by 이지안 on 5/9/25.
+//  2.3.0 - 四大模块：美化 / 分辨率 / 工具箱 / 设置
 //
 
 import SwiftUI
 
 struct RootView: View {
     @StateObject private var logStore = LogStore()
+    @ObservedObject private var settings = AppSettings.shared
     @State private var sharedBusy: Bool = false
 
     var body: some View {
         TabView {
-            ContentView(logStore: logStore,
-                        onBusyChange: { sharedBusy = $0 })
-                .tabItem {
-                    Label("美化", systemImage: "wand.and.stars")
-                }
+            NavigationView {
+                ContentView(logStore: logStore,
+                            onBusyChange: { sharedBusy = $0 })
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("美化", systemImage: "wand.and.stars")
+            }
 
-            ResolutionView(isBusy: $sharedBusy, logStore: logStore)
-                .tabItem {
-                    Label("分辨率", systemImage: "display")
-                }
+            NavigationView {
+                ResolutionView(isBusy: $sharedBusy, logStore: logStore)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("分辨率", systemImage: "display")
+            }
+
+            NavigationView {
+                ToolsView(logStore: logStore, isBusy: $sharedBusy)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("工具箱", systemImage: "wrench.fill")
+            }
+
+            NavigationView {
+                SettingsView(logStore: logStore)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("设置", systemImage: "gearshape.fill")
+            }
         }
-        .tint(.purple)
+        .tint(settings.theme.primary)
         .preferredColorScheme(.dark)
-        .animation(.easeOut(duration: 0.1), value: sharedBusy)
+        .animation(.easeOut(duration: settings.anim), value: settings.themeIndex)
     }
 }
 
 @main
 struct mdcXApp: App {
     init() {
-        // 让所有动画更快速、更有响应感
+        // 保留系统动画（加速由 SwiftUI 层的统一短时长控制）
         UIView.setAnimationsEnabled(true)
+        // 全局导航栏外观：深色透明底，避免默认材质与自定义背景割裂
+        let nav = UINavigationBar.appearance()
+        nav.barTintColor = UIColor(red: 0.027, green: 0.027, blue: 0.045, alpha: 1)
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.backgroundColor = UIColor(red: 0.027, green: 0.027, blue: 0.045, alpha: 0.85)
+        nav.standardAppearance = appearance
+        nav.scrollEdgeAppearance = appearance
+
+        let tab = UITabBar.appearance()
+        tab.barTintColor = UIColor(red: 0.027, green: 0.027, blue: 0.045, alpha: 1)
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithDefaultBackground()
+        tabAppearance.backgroundColor = UIColor(red: 0.035, green: 0.035, blue: 0.06, alpha: 0.98)
+        tab.standardAppearance = tabAppearance
+        if #available(iOS 15.0, *) {
+            tab.scrollEdgeAppearance = tabAppearance
+        }
+
+        // List/Table 背景透明化，交给自定义底色
+        UITableView.appearance().backgroundColor = .clear
+        UITableViewCell.appearance().backgroundColor = .clear
     }
-    
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .preferredColorScheme(.dark)
+                .onAppear { AppSettings.shared.hasLaunched = true }
         }
     }
 }

@@ -58,10 +58,15 @@ enum ResolutionSetter {
     }
 
     static let builtInPresets: [Preset] = [
-        Preset(name: "iPhone 6/7/8 Plus",           width: 1242, height: 2208),
-        Preset(name: "iPhone Xs Max / 11 Pro Max",  width: 1242, height: 2688),
-        Preset(name: "iPhone 12/13 Pro Max / 14 Plus", width: 1284, height: 2778),
-        Preset(name: "iPhone 14 Pro Max",           width: 1290, height: 2796),
+        // 小屏 → 大屏，按物理像素排序
+        Preset(name: "iPhone 6/7/8 Plus",             width: 1242, height: 2208),
+        Preset(name: "iPhone Xs Max / 11 Pro Max",    width: 1242, height: 2688),
+        Preset(name: "iPhone 12/13 mini",             width: 1080, height: 2340),
+        Preset(name: "iPhone 12/13/14 / 13 Pro",      width: 1170, height: 2532),
+        Preset(name: "iPhone 14 Pro / 15 / 16 Pro",   width: 1179, height: 2556),
+        Preset(name: "iPhone 12/13 Pro Max / 14 Plus",width: 1284, height: 2778),
+        Preset(name: "iPhone 14/15 Pro Max / 16 Plus",width: 1290, height: 2796),
+        Preset(name: "iPhone 16 Pro Max",             width: 1320, height: 2868),
     ]
 
     // MARK: - 能力探测
@@ -71,21 +76,31 @@ enum ResolutionSetter {
         let reason: String
     }
 
+    private static var cachedCapability: Capability?
+
     static func detect() -> Capability {
+        if let cached = cachedCapability { return cached }
+        let result: Capability
         guard RootProc.hasPackagedHelper else {
-            return Capability(
+            result = Capability(
                 available: false,
                 reason: "App 包内未找到 killall 提权工具。\n"
                       + "请确认构建时已执行 copy-helper.sh，且 Info.plist 声明了 TSRootBinaries。")
+            cachedCapability = result
+            return result
         }
         let preferencesDirectory = (preferencesPath as NSString).deletingLastPathComponent
         guard FileManager.default.isWritableFile(atPath: preferencesDirectory) else {
-            return Capability(
+            result = Capability(
                 available: false,
                 reason: "无 root 权限，无法写入系统偏好域。\n"
                       + "请通过 TrollStore 安装，并确认设备已授予相关权限。")
+            cachedCapability = result
+            return result
         }
-        return Capability(available: true, reason: "可用")
+        result = Capability(available: true, reason: "可用")
+        cachedCapability = result
+        return result
     }
 
     // MARK: - 当前分辨率
