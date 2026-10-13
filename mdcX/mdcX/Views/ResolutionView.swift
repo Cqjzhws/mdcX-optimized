@@ -154,7 +154,6 @@ struct ResolutionView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
         .navigationTitle("分辨率")
         .onAppear { self.refresh() }
