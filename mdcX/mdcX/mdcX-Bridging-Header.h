@@ -7,5 +7,6 @@
 
 #include "exploit_poc.h"
 #import "RespringHelper.h"
+#import "objc/TSRootSpawn.h"
 
 #endif

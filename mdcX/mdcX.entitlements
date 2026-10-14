@@ -7,5 +7,9 @@
 	<true/>
 	<key>get-task-allow</key>
 	<true/>
+	<!-- TrollStore 官方 root helper 授权：脱离沙盒后可经
+	     posix_spawnattr_set_persona_np(99) 以 root spawn 二进制（杀 backboardd 等） -->
+	<key>com.apple.private.persona-mgmt</key>
+	<true/>
 </dict>
 </plist>

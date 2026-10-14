@@ -57,20 +57,22 @@ struct ToolsView: View {
 
             // MARK: root 执行链诊断
             Section {
-                // 关键：真正的 setuid-root 状态（决定能否杀 backboardd）
+                // 关键：TrollStore 官方 root 通道 persona-mgmt（决定能否杀 backboardd）
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: RootProc.isRealSetuidRoot ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    Image(systemName: RootProc.hasRootChannel ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                         .font(.system(size: 13))
-                        .foregroundColor(RootProc.isRealSetuidRoot ? .green : .orange)
+                        .foregroundColor(RootProc.hasRootChannel ? .green : .orange)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("killall 真实 root（uid=0 + setuid）")
+                        Text("Root 通道（persona-mgmt / setuid）")
                             .font(.system(size: 12.5, weight: .bold))
                             .foregroundColor(.white.opacity(0.9))
-                        Text(RootProc.isRealSetuidRoot
-                             ? "已 root 化，可结束 backboardd，分辨率可生效。"
-                             : "未 root 化：只能注销，分辨率无法生效。需在 TrollStore 卸载后全新安装本版本。")
+                        Text(RootProc.hasPersonaEntitlement
+                             ? "主程序已带 persona-mgmt，将以 root 运行 killall，可结束 backboardd。"
+                             : (RootProc.isRealSetuidRoot
+                                ? "检测到 setuid-root killall。"
+                                : "无 root 通道：无法结束 backboardd，分辨率不生效。请用 TrollStore 全新安装本版本。"))
                             .font(.system(size: 10.5))
-                            .foregroundColor(RootProc.isRealSetuidRoot ? .green : .orange)
+                            .foregroundColor(RootProc.hasRootChannel ? .green : .orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }

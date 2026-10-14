@@ -122,9 +122,7 @@ enum RootProc {
             && s.contains("platform-application")
     }
 
-    /// 真正的 root：bundle helper 必须 uid=0 且带 setuid 位。
-    /// 仅内嵌 entitlement 但 uid=mobile 时，能杀 mobile 进程（SpringBoard/cfprefsd），
-    /// 却无法结束 backboardd 这种跨用户平台守护——这是「注销有效但分辨率不生效」的根因。
+    /// 传统 setuid-root 方式（老 TrollStore / 越狱环境）
     static var isRealSetuidRoot: Bool {
         guard let p = bundleHelperPath else { return false }
         let st = inspect(p)
@@ -132,24 +130,17 @@ enum RootProc {
     }
 
     /// 是否存在可结束 backboardd 的 root 通道。
-    /// 以真正 setuid-root 为准；entitlement 单独存在不算（mobile 身份不够）。
+    /// TrollStore 2 / iOS16 官方方式：主 App 带 persona-mgmt（root persona spawn），
+    /// 不依赖 killall 的 setuid；其次兼容传统 setuid-root。
     static var hasRootChannel: Bool {
-        isRealSetuidRoot
+        hasPersonaEntitlement || isRealSetuidRoot
     }
 
     /// 面向用户的安装状态提示
     static var installGuidance: String? {
-        guard let p = bundleHelperPath else {
-            return "包内缺少 killall，构建不完整。"
-        }
-        let st = inspect(p)
-        if st.exists && st.uid == 0 && st.isSetUID {
-            return nil  // 已正确 root 化
-        }
-        if st.exists {
-            return "killall 当前 uid=\(st.uid.map(String.init) ?? "?")、无 setuid-root（以 mobile 身份运行，无法结束 backboardd）。这通常是覆盖升级安装导致 TrollStore 未执行 root 化。请在 TrollStore 中先卸载本 App，再全新安装本版本。"
-        }
-        return nil
+        if hasPersonaEntitlement { return nil }
+        if isRealSetuidRoot { return nil }
+        return "主程序缺少 com.apple.private.persona-mgmt 授权（非 TrollStore 安装或版本过旧）。请用 TrollStore 全新安装本版本。"
     }
 
     /// root 执行链总体是否「有希望」（存在可执行 killall，无论是否 setuid，
@@ -159,6 +150,14 @@ enum RootProc {
     }
 
     // MARK: - 执行原语
+
+    /// TrollStore 官方 root spawn：主 App 带 persona-mgmt entitlement 时，
+    /// 子进程以 persona 99 / uid 0 运行，可结束 backboardd 等系统守护。
+    /// - Returns: 退出码（0 成功）；-200 spawn 失败；-201 被信号终止
+    @discardableResult
+    static func runRoot(path: String, arguments: [String]) -> Int32 {
+        return TSRootSpawn.spawnRoot(path, arguments: arguments)
+    }
 
     @discardableResult
     static func run(path: String, arguments: [String]) -> Bool {
@@ -200,15 +199,37 @@ enum RootProc {
 
     // MARK: - 智能执行（对外主入口）
 
+    /// 主 App 是否带 persona-mgmt entitlement（TrollStore root spawn 的钥匙）
+    static var hasPersonaEntitlement: Bool {
+        // 直接读自身内嵌 entitlement 标记
+        guard let exe = Bundle.main.executablePath,
+              let data = try? Data(contentsOf: URL(fileURLWithPath: exe)) else { return false }
+        return String(decoding: data, as: UTF8.self).contains("com.apple.private.persona-mgmt")
+    }
+
     /// 按优先级尝试所有可用执行链，返回详细报告。
     static func execute(arguments: [String], allowShellFallback: Bool = true) -> RootExecReport {
         let fm = FileManager.default
         var tried: [String] = []
 
-        // ---- 策略 1/2：所有候选路径，优先 setuid-root 的 ----
+        // ---- 策略 0（TrollStore 官方，iOS16 正确方式）：root persona spawn 包内 killall ----
+        // 不要求 killall 自身 setuid/root；主 App 的 persona-mgmt entitlement 让子进程提权。
+        if let bundleHelper = bundleHelperPath {
+            tried.append(bundleHelper)
+            let code = runRoot(path: bundleHelper, arguments: arguments)
+            if code == 0 {
+                return RootExecReport(succeeded: true, usedPath: bundleHelper,
+                                      method: "root persona spawn（persona-mgmt）",
+                                      detail: "以 root 执行：killall \(arguments.joined(separator: " "))",
+                                      triedPaths: tried)
+            }
+            NSLog("[RootProc] root persona spawn code=%d args=%@", code, arguments)
+        }
+
+        // ---- 策略 1/2：候选路径普通 spawn（兼容越狱/老 TrollStore setuid 方式） ----
         var privilegedPaths: [String] = []
         var normalPaths: [String] = []
-        for path in allCandidates() {
+        for path in allCandidates() where path != bundleHelperPath {
             tried.append(path)
             let info = inspect(path)
             if !info.isExecutable { continue }
