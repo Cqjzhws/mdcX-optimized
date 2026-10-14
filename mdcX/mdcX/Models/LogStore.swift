@@ -51,7 +51,7 @@ class LogStore: ObservableObject {
     private let flushInterval: TimeInterval = 0.15
 
     @Published private(set) var entries: [LogEntry] = [
-        LogEntry(date: Date(), level: .info, text: "mdcX Max 2.3.6 已就绪")
+        LogEntry(date: Date(), level: .info, text: "mdcX Max 2.3.7 已就绪")
     ]
 
     /// 兼容旧 UI 的整段文本（由 entries 派生）。

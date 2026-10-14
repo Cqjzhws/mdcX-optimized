@@ -19,7 +19,6 @@ struct ResolutionView: View {
     @State private var current: ResolutionSetter.Canvas? = nil
     @State private var alertItem: AlertItem? = nil
     @State private var isApplying: Bool = false
-    @State private var busyRefresh: Bool = false
 
     private var capability: ResolutionSetter.Capability { ResolutionSetter.detect() }
     private var theme: AppTheme { settings.theme }
@@ -147,25 +146,8 @@ struct ResolutionView: View {
                 .disabled(isBusy || !capability.available || !ResolutionSetter.hasBackup)
                 .opacity(ResolutionSetter.hasBackup ? 1 : 0.5)
                 .listRowBackground(Color.clear)
-
-                // 手动重新加载显示服务（分辨率写入后可用；普通注销 SpringBoard 不会刷新 canvas）
-                Button {
-                    restartDisplayServer()
-                } label: {
-                    HStack {
-                        Spacer()
-                        if busyRefresh { ProgressView().padding(.trailing, 6) }
-                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 13, weight: .bold))
-                        Text(busyRefresh ? "正在重启显示服务…" : "重启显示服务 backboardd（让分辨率生效）").bold()
-                        Spacer()
-                    }
-                }
-                .buttonStyle(CustomButtonStyle(color: .blue))
-                .disabled(isBusy || busyRefresh || !capability.available)
-                .opacity(capability.available ? 1 : 0.5)
-                .listRowBackground(Color.clear)
             } footer: {
-                Text("分辨率由显示服务 backboardd 读取：点「应用」会先清偏好缓存再重启 backboardd，屏幕会黑几秒后回到锁屏（这不是普通注销，普通注销不会改变分辨率）。若仍未生效，请重启手机。")
+                Text("点「应用」会自动清偏好缓存并重启显示服务 backboardd，屏幕黑几秒后回到锁屏，分辨率即生效。若出现异常黑屏，请强制重启手机（音量+→音量-→长按电源）。")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.4))
             }
@@ -271,25 +253,6 @@ struct ResolutionView: View {
         }
     }
 
-    /// 手动分步重启显示服务，让已写入的 canvas 生效
-    private func restartDisplayServer() {
-        busyRefresh = true
-        isBusy = true
-        logStore.append("[分辨率] 分步刷新：先 cfprefsd 后 backboardd …")
-        DispatchQueue.global(qos: .userInitiated).async {
-            let report = RootProc.restartBackboard()
-            DispatchQueue.main.async {
-                busyRefresh = false
-                isBusy = false
-                if report.succeeded {
-                    self.logStore.append("显示服务已重启（\(report.method)），屏幕将黑几秒后回锁屏", level: .success)
-                } else {
-                    self.logStore.append("重启显示服务失败：\(report.detail)", level: .error)
-                }
-            }
-        }
-    }
-
     private func performRestore() {
         isBusy = true
         logStore.append("[分辨率] 正在还原原始设置 …")
@@ -315,10 +278,10 @@ struct ResolutionView: View {
             logStore.append("[分辨率] 失败：\(reason)", level: .error)
         case .restartFailed(let detail):
             logStore.append("[分辨率] 配置已写入，但重启显示服务失败：\(detail)", level: .warn)
-            logStore.append("[分辨率] 请点下方「重启显示服务 backboardd」，或重启手机。普通注销无效。", level: .info)
+            logStore.append("[分辨率] 请到工具箱点「重启显示服务 backboardd」，或重启手机。", level: .info)
             alertItem = AlertItem(
                 title: Text("分辨率已写入，待重启显示服务"),
-                message: Text("画布配置已保存，但 backboardd 未能自动重启。\n\n请点下方蓝色「重启显示服务 backboardd」；若仍不生效请重启手机。\n\n注意：普通「注销」只重启 SpringBoard，不会改变分辨率。\n\n诊断：\(detail)"),
+                message: Text("画布配置已保存，但 backboardd 未能自动重启。\n\n请到「工具箱」点「重启显示服务 backboardd」，或直接重启手机后生效。\n\n诊断：\(detail)"),
                 primaryButton: .default(Text("知道了")),
                 secondaryButton: nil)
         }
