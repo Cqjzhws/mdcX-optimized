@@ -260,9 +260,24 @@ enum RootProc {
         execute(arguments: ["-9", "SpringBoard"])
     }
 
-    /// 分辨率生效：重启 cfprefsd + backboardd
+    /// 分辨率生效：必须分两步——
+    /// 1) 先杀 cfprefsd，丢弃内存中的旧偏好缓存（launchd 会立即重启它）
+    /// 2) 等待其重新拉起
+    /// 3) 再杀 backboardd，它重启时才会从磁盘 plist 重新读取 canvas
+    /// 同时杀两个时 launchd 重启顺序不定，backboardd 常读到旧缓存 → 表现为
+    /// 「plist 已改、也注销/黑屏了，但分辨率不变」。
     static func restartBackboard() -> RootExecReport {
-        execute(arguments: ["-9", "cfprefsd", "backboardd"])
+        let first = execute(arguments: ["-9", "cfprefsd"])
+        guard first.succeeded else { return first }
+        // 给 launchd 重启 cfprefsd 的时间
+        Thread.sleep(forTimeInterval: 1.5)
+        let second = execute(arguments: ["-9", "backboardd"])
+        guard second.succeeded else { return second }
+        return RootExecReport(succeeded: true,
+                              usedPath: second.usedPath,
+                              method: "cfprefsd → backboardd（分步刷新）",
+                              detail: "偏好缓存已清除并重启显示服务",
+                              triedPaths: second.triedPaths)
     }
 
     static func killBackboard() -> RootExecReport {

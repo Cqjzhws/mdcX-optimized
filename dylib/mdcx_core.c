@@ -31,7 +31,7 @@
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 
-#define MDCX_CORE_VERSION "2.3.3"
+#define MDCX_CORE_VERSION "2.3.4"
 
 __attribute__((visibility("default")))
 const char *mdcx_core_version(void) {

@@ -193,10 +193,17 @@ enum ResolutionSetter {
             return .writeFailed("写入失败：App 仍处于沙盒中或无目录写权限，请确认使用的是本版本且经 TrollStore 安装。")
         }
 
-        // 刷新偏好缓存 + 重启显示服务使其生效。
+        // 强制把内核页缓存刷到磁盘，随后直接读文件校验（绕开 cfprefsd）
+        sync()
+        guard let verify = NSDictionary(contentsOfFile: preferencesPath),
+              (verify[widthKey] as? NSNumber)?.intValue == width,
+              (verify[heightKey] as? NSNumber)?.intValue == height else {
+            return .writeFailed("写入后读回校验失败，系统可能拦截了该偏好文件。")
+        }
+
+        // 关键：分步刷新——先 cfprefsd 再 backboardd，分辨率才会真正重载。
         let report = RootProc.restartBackboard()
         if !report.succeeded {
-            // 配置已落盘；只要随后注销/重启设备仍会生效
             return .restartFailed(report.detail)
         }
 

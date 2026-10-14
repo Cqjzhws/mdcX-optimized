@@ -141,11 +141,10 @@ struct ToolsView: View {
                                       successLog: "注销指令已执行，界面即将重启")
                         }, secondaryButton: .cancel())
                 }
-                actionButton(title: "重启显示服务 backboardd",
+                actionButton(title: "重启显示服务 backboardd（分步刷新，分辨率生效）",
                              icon: "display", tint: .blue,
                              busy: busyAction == "backboardd") {
-                    runHelper("backboardd", args: ["-9", "backboardd"],
-                              successLog: "backboardd 已重启")
+                    runRestartBackboard()
                 }
                 actionButton(title: "刷新系统偏好缓存（cfprefsd）",
                              icon: "arrow.triangle.capsulepath", tint: .teal,
@@ -308,6 +307,25 @@ struct ToolsView: View {
                 } else {
                     logStore.append("操作失败：\(report.detail)", level: .error)
                     logStore.append("已尝试路径：\(report.triedPaths.joined(separator: "；"))", level: .warn)
+                }
+            }
+        }
+    }
+
+    /// 分步重启显示服务（先 cfprefsd 后 backboardd），分辨率生效专用
+    private func runRestartBackboard() {
+        busyAction = "backboardd"
+        isBusy = true
+        logStore.append("分步刷新显示服务：cfprefsd → backboardd …")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let report = RootProc.restartBackboard()
+            DispatchQueue.main.async {
+                busyAction = nil
+                isBusy = false
+                if report.succeeded {
+                    self.logStore.append("显示服务已重启，屏幕黑几秒后回锁屏；分辨率应已生效（\(report.method)）", level: .success)
+                } else {
+                    self.logStore.append("重启显示服务失败：\(report.detail)", level: .error)
                 }
             }
         }
