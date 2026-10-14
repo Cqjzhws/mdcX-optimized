@@ -80,8 +80,9 @@ jobs:
           plutil -convert xml1 -o "$ENT_FILE" "$ENT_FILE"
           plutil -lint "$ENT_FILE"
           codesign --force --sign - --entitlements "$ENT_FILE" "$APP_PATH/mdcX"
-          # killall 做 ad-hoc 签名；root/setuid 由 TrollStore 按 TSRootBinaries 在安装时设置
-          codesign --force --sign - "$APP_PATH/killall"
+          # 注意：预置的 killall 是旧 Mach-O，现代 codesign 重签会报
+          # "internal error in Code Signing subsystem"，因此保持原样；
+          # root/setuid 由 TrollStore 安装时按 TSRootBinaries 自行处理。
           chmod 755 "$APP_PATH/killall"
 
           echo "== Embedded entitlements =="
