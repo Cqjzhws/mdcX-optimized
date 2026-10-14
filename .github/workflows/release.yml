@@ -21,7 +21,7 @@ jobs:
       - name: Download IPA artifact
         uses: actions/download-artifact@v4
         with:
-          name: mdcX-Max-2.3.2-IPA
+          name: mdcX-Max-2.3.3-IPA
           path: artifacts/ipa
           run-id: ${{ inputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -29,7 +29,7 @@ jobs:
       - name: Download dylib artifact
         uses: actions/download-artifact@v4
         with:
-          name: mdcXCore-2.3.2-dylib
+          name: mdcXCore-2.3.3-dylib
           path: artifacts/dylib
           run-id: ${{ inputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -37,7 +37,7 @@ jobs:
       - name: Download bundle artifact
         uses: actions/download-artifact@v4
         with:
-          name: mdcX-Max-2.3.2-bundle
+          name: mdcX-Max-2.3.3-bundle
           path: artifacts/bundle
           run-id: ${{ inputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -49,14 +49,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.3.2-max
-          name: "mdcX Max v2.3.2 (Root/Resolution Fix)"
+          tag_name: v2.3.3-max
+          name: "mdcX Max v2.3.3 (Root/Resolution Fix)"
           files: |
             artifacts/ipa/*.ipa
             artifacts/dylib/*.dylib
             artifacts/bundle/*.zip
           body: |
-            ## mdcX Max v2.3.2 — 修复分辨率/注销不可用
+            ## mdcX Max v2.3.3 — 修复分辨率/注销不可用
 
             ### 关键修复
             - **注入 TrollStore 特权 entitlements**（no-sandbox / platform-application）：

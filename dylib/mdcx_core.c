@@ -1,4 +1,4 @@
-/*
+﻿/*
  * mdcx_core.c — mdcX Max 2.3.0 核心利用库 (arm64, iOS)
  * ------------------------------------------------------------------
  * 自包含的 MacDirtyCow (CVE-2022-46689) 文件页操作原语，
@@ -31,7 +31,7 @@
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 
-#define MDCX_CORE_VERSION "2.3.2"
+#define MDCX_CORE_VERSION "2.3.3"
 
 __attribute__((visibility("default")))
 const char *mdcx_core_version(void) {

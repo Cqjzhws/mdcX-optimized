@@ -22,11 +22,14 @@ struct ToolsView: View {
     private var anyBusy: Bool { isBusy || busyAction != nil || soundBatchRunning }
 
     private var rootHelperDetail: String {
+        if RootProc.helperHasRootEntitlements {
+            return "killall 内嵌 root 特权 entitlement（TrollStore 授权），可注销/重启显示服务"
+        }
         if RootProc.hasPrivilegedHelper {
             return "检测到 setuid-root killall，可执行注销/重启显示服务"
         }
         if RootProc.anyExecutableHelper {
-            return "找到 killall 但都不是 root 所有/无 setuid 位，将尝试 shell 方案，可能失败"
+            return "找到 killall 但无 root 特权（无 setuid/无 entitlement），无法结束系统进程"
         }
         return "未找到任何可执行 killall"
     }
@@ -45,7 +48,7 @@ struct ToolsView: View {
                           ok: report.zeroPageSupported)
                 compatRow(title: "Root Helper（killall）",
                           detail: rootHelperDetail,
-                          ok: RootProc.hasPrivilegedHelper)
+                          ok: RootProc.hasRootChannel)
                 compatRow(title: "分辨率修改",
                           detail: ResolutionSetter.detect().available ? "偏好域可写（重启显示服务需要 root）" : ResolutionSetter.detect().reason,
                           ok: ResolutionSetter.detect().available)
@@ -54,6 +57,19 @@ struct ToolsView: View {
 
             // MARK: root 执行链诊断
             Section {
+                HStack(spacing: 6) {
+                    Image(systemName: RootProc.helperHasRootEntitlements ? "checkmark.seal.fill" : "xmark.seal")
+                        .font(.system(size: 12))
+                        .foregroundColor(RootProc.helperHasRootEntitlements ? .green : .red)
+                    Text("killall 内嵌 root entitlement")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85))
+                    Spacer()
+                    Text(RootProc.helperHasRootEntitlements ? "已嵌入" : "缺失")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(RootProc.helperHasRootEntitlements ? .green : .red)
+                }
+                .padding(.vertical, 3)
                 ForEach(candidateStates, id: \.path) { st in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {

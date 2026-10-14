@@ -108,9 +108,24 @@ enum RootProc {
 
     static var hasPackagedHelper: Bool { bundleHelperPath != nil }
 
-    /// 任意一个候选路径具备 setuid-root 标记
+    /// 任意一个候选路径具备 setuid-root 标记（传统 root 方式）
     static var hasPrivilegedHelper: Bool {
         allCandidates().contains { inspect($0).looksPrivileged }
+    }
+
+    /// 包内 helper 是否内嵌了 root 特权 entitlements（TrollStore 2.x 方式：
+    /// 不靠 setuid 位，而是保留二进制内嵌 entitlement 授予 root）。
+    static var helperHasRootEntitlements: Bool {
+        guard let p = bundleHelperPath,
+              let data = try? Data(contentsOf: URL(fileURLWithPath: p)) else { return false }
+        let s = String(decoding: data, as: UTF8.self)
+        return s.contains("task_for_pid-allow")
+            && s.contains("platform-application")
+    }
+
+    /// 是否存在可用的 root 通道（setuid 或内嵌 entitlement 任一成立）
+    static var hasRootChannel: Bool {
+        hasPrivilegedHelper || helperHasRootEntitlements
     }
 
     /// root 执行链总体是否「有希望」（存在可执行 killall，无论是否 setuid，

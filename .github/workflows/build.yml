@@ -90,19 +90,25 @@ jobs:
           # ---- 先签内嵌 helper（顺序重要：主程序封入时需包含已签名 helper）----
           # 预置 killall 是老式 Mach-O，现代 codesign 重签会报
           # "internal error in Code Signing subsystem"；
-          # 若不签名，iOS 16 上从 App 进程 posix_spawn 它会被 AMFI 直接杀死，
-          # 表现为「点注销/应用分辨率毫无反应」。
-          # ldid 是越狱/TrollStore 生态签名工具，可处理这类旧二进制。
+          # 若不签名，iOS 16 上从 App 进程 posix_spawn 它会被 AMFI 直接杀死。
+          #
+          # 关键：仅 ad-hoc 签名只能让它“能运行”，仍以 mobile 身份运行，无权 kill
+          # 系统进程。必须用 ldid -S<entitlements> 给 helper 嵌入 root 特权
+          # （platform-application / no-sandbox / task_for_pid-allow / system-task-ports），
+          # TrollStore 2.x 安装时会保留这些内嵌 entitlement 并据此授予 root，
+          # 不再依赖文件系统的 setuid 位。
+          HELPER_ENT="${GITHUB_WORKSPACE}/mdcX/helper.entitlements"
+          plutil -lint "$HELPER_ENT"
           chmod 755 "$APP_PATH/killall"
           if command -v ldid >/dev/null 2>&1; then
-            echo "Signing killall with ldid (ad-hoc)..."
-            ldid -S "$APP_PATH/killall"
+            echo "Signing killall with ldid + privileged entitlements..."
+            ldid -S"$HELPER_ENT" "$APP_PATH/killall"
           else
             echo "ldid unavailable, falling back to codesign..."
-            codesign --force --sign - --timestamp=none "$APP_PATH/killall" || true
+            codesign --force --sign - --timestamp=none --entitlements "$HELPER_ENT" "$APP_PATH/killall" || true
           fi
           echo "== killall signature =="
-          codesign -dv "$APP_PATH/killall" 2>&1 | head -8 || true
+          codesign -dv --entitlements - "$APP_PATH/killall" 2>&1 | head -40 || true
           file "$APP_PATH/killall"
 
           # ---- 再签主程序并注入特权 entitlements ----
@@ -116,7 +122,7 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
           cd build/ipa
-          IPA_NAME="mdcX_Max_v2.3.2.ipa"
+          IPA_NAME="mdcX_Max_v2.3.3.ipa"
           zip -qr "$IPA_NAME" Payload -x "*.DS_Store"
           ls -la "$IPA_NAME"
           echo "IPA_PATH=$(pwd)/$IPA_NAME" >> $GITHUB_OUTPUT
@@ -159,13 +165,13 @@ jobs:
         id: bundle
         run: |
           set -e
-          mkdir -p build/bundle/mdcX-Max-2.3.2
-          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.2/
-          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.2/
-          cat > build/bundle/mdcX-Max-2.3.2/INSTALL.txt <<'EOF'
-          mdcX Max v2.3.2
+          mkdir -p build/bundle/mdcX-Max-2.3.3
+          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.3/
+          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.3/
+          cat > build/bundle/mdcX-Max-2.3.3/INSTALL.txt <<'EOF'
+          mdcX Max v2.3.3
           ====================================
-          1. mdcX_Max_v2.3.2.ipa — 必须使用 TrollStore 安装。
+          1. mdcX_Max_v2.3.3.ipa — 必须使用 TrollStore 安装。
              本版本已注入 no-sandbox / platform-application 特权，
              分辨率修改与注销（killall root helper）才可正常工作。
              AltStore / Sideloadly 等普通侧载无法授予 root。
@@ -175,8 +181,8 @@ jobs:
              mdcx_overwrite_file / mdcx_core_version）。
           EOF
           cd build/bundle
-          zip -qr mdcX-Max-2.3.2-bundle.zip mdcX-Max-2.3.2
-          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.2-bundle.zip" >> $GITHUB_OUTPUT
+          zip -qr mdcX-Max-2.3.3-bundle.zip mdcX-Max-2.3.3
+          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.3-bundle.zip" >> $GITHUB_OUTPUT
 
       # ---------------------------------------------------------------
       # 4) 上传 Artifacts
@@ -184,20 +190,20 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.2-IPA
+          name: mdcX-Max-2.3.3-IPA
           path: ${{ steps.build.outputs.IPA_PATH }}
           retention-days: 60
 
       - name: Upload dylib artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcXCore-2.3.2-dylib
+          name: mdcXCore-2.3.3-dylib
           path: ${{ steps.dylib.outputs.DYLIB_PATH }}
           retention-days: 60
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.2-bundle
+          name: mdcX-Max-2.3.3-bundle
           path: ${{ steps.bundle.outputs.BUNDLE_PATH }}
           retention-days: 60

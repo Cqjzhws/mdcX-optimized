@@ -1,4 +1,4 @@
-//
+﻿//
 //  SettingsView.swift
 //  mdcX Max
 //
@@ -97,7 +97,7 @@ struct SettingsView: View {
 
             // MARK: 关于
             Section {
-                InfoRow(icon: "app.fill", tint: settings.theme.primary, title: "版本", value: "2.3.2 (232)", monospaced: true)
+                InfoRow(icon: "app.fill", tint: settings.theme.primary, title: "版本", value: "2.3.3 (233)", monospaced: true)
                 InfoRow(icon: "hammer.fill", tint: .indigo, title: "构建通道", value: "macOS CI · Theos/Xcode")
                 InfoRow(icon: "function", tint: .teal, title: "核心库", value: "mdcXCore.dylib arm64", monospaced: true)
                 VStack(alignment: .leading, spacing: 5) {

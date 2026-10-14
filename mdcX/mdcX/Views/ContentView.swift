@@ -194,10 +194,10 @@ struct ContentView: View {
         isRespringProcessing = true
         onBusyChange(true)
 
-        let privileged = RootProc.hasPrivilegedHelper
+        let privileged = RootProc.hasRootChannel
         logStore.append(privileged
                         ? "通过 root killall 重启 SpringBoard（注销）…"
-                        : "未发现 setuid-root helper，尝试全部执行链（含 shell）…",
+                        : "未发现 root 通道，尝试全部执行链（含 shell）…",
                         level: .info)
         DispatchQueue.global(qos: .userInitiated).async {
             let report = RootProc.respring()
@@ -239,7 +239,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
-                    let privileged = RootProc.hasPrivilegedHelper
+                    let privileged = RootProc.hasRootChannel
                     alertItem = AlertItem(
                         title: Text("确认注销"),
                         message: Text(privileged
@@ -336,8 +336,8 @@ struct ContentView: View {
             HStack(spacing: 7) {
                 statusDot(ok: report.zeroPageSupported,
                           text: report.zeroPageSupported ? "零页利用可用" : "零页已修补")
-                statusDot(ok: RootProc.hasPrivilegedHelper,
-                          text: RootProc.hasPrivilegedHelper ? "Root 授权" : "Root 未授权")
+                statusDot(ok: RootProc.hasRootChannel,
+                          text: RootProc.hasRootChannel ? "Root 授权" : "Root 未授权")
                 Spacer()
                 StatPill(icon: "checkmark", value: sessionOK, tint: .green)
                 StatPill(icon: "xmark", value: sessionFail, tint: .red)
