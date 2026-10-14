@@ -74,6 +74,11 @@ jobs:
           # -----------------------------------------------------------
           ENT_FILE="${GITHUB_WORKSPACE}/mdcX/mdcX.entitlements"
           echo "Injecting entitlements: $ENT_FILE"
+          # 校验并规范化（消除潜在 BOM/格式问题，AMFIUnserializeXML 极挑剔）
+          plutil -lint "$ENT_FILE"
+          xxd "$ENT_FILE" | head -2
+          plutil -convert xml1 -o "$ENT_FILE" "$ENT_FILE"
+          plutil -lint "$ENT_FILE"
           codesign --force --sign - --entitlements "$ENT_FILE" "$APP_PATH/mdcX"
           # killall 做 ad-hoc 签名；root/setuid 由 TrollStore 按 TSRootBinaries 在安装时设置
           codesign --force --sign - "$APP_PATH/killall"

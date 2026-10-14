@@ -1,21 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- TrollStore 安装时会保留这些 entitlements 并以平台信任链重签。
-	     没有它们，App 即使通过 TrollStore 安装，仍然被关在普通沙盒里，
-	     无法读写 /var/mobile/Library/Preferences 等容器外系统路径，
-	     也无法顺利执行 root helper，分辨率与注销功能都会失效。 -->
-
-	<!-- 关闭容器沙盒：允许写入系统偏好域等容器外路径 -->
 	<key>com.apple.private.security.no-sandbox</key>
 	<true/>
-
-	<!-- 平台应用身份：放宽大量系统私有操作限制 -->
 	<key>platform-application</key>
 	<true/>
-
-	<!-- 允许调试器附加（TrollStore 工具惯例，无副作用） -->
 	<key>get-task-allow</key>
 	<true/>
 </dict>
