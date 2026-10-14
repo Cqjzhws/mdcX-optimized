@@ -60,8 +60,8 @@ enum RootProc {
     struct FilePrivilege {
         let path: String
         let exists: Bool
-        let uid: uid_t
-        let gid: gid_t
+        let uid: Int?
+        let gid: Int?
         let mode: mode_t
         let isSetUID: Bool
         let isExecutable: Bool
@@ -70,8 +70,10 @@ enum RootProc {
         var looksPrivileged: Bool { exists && isSetUID && ownerRoot }
 
         var shortMode: String {
-            String(format: "%04o uid=%d gid=%d%@%@",
-                   mode & 0o7777, uid, gid,
+            String(format: "%04o uid=%@ gid=%@%@%@",
+                   mode & 0o7777,
+                   uid.map { String($0) } ?? "-",
+                   gid.map { String($0) } ?? "-",
                    isSetUID ? " setuid" : "",
                    isExecutable ? " +x" : "")
         }
@@ -80,13 +82,13 @@ enum RootProc {
     static func inspect(_ path: String) -> FilePrivilege {
         var st = stat()
         guard stat(path, &st) == 0 else {
-            return FilePrivilege(path: path, exists: false, uid: -1, gid: -1, mode: 0,
+            return FilePrivilege(path: path, exists: false, uid: nil, gid: nil, mode: 0,
                                  isSetUID: false, isExecutable: false)
         }
         return FilePrivilege(path: path,
                              exists: true,
-                             uid: st.st_uid,
-                             gid: st.st_gid,
+                             uid: Int(st.st_uid),
+                             gid: Int(st.st_gid),
                              mode: st.st_mode,
                              isSetUID: (st.st_mode & S_ISUID) != 0,
                              isExecutable: (st.st_mode & 0o111) != 0)
