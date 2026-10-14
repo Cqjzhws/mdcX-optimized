@@ -113,8 +113,7 @@ enum RootProc {
         allCandidates().contains { inspect($0).looksPrivileged }
     }
 
-    /// 包内 helper 是否内嵌了 root 特权 entitlements（TrollStore 2.x 方式：
-    /// 不靠 setuid 位，而是保留二进制内嵌 entitlement 授予 root）。
+    /// 包内 helper 是否内嵌了特权 entitlements（ldid 注入，含 backboardd 控制键）
     static var helperHasRootEntitlements: Bool {
         guard let p = bundleHelperPath,
               let data = try? Data(contentsOf: URL(fileURLWithPath: p)) else { return false }
@@ -123,9 +122,34 @@ enum RootProc {
             && s.contains("platform-application")
     }
 
-    /// 是否存在可用的 root 通道（setuid 或内嵌 entitlement 任一成立）
+    /// 真正的 root：bundle helper 必须 uid=0 且带 setuid 位。
+    /// 仅内嵌 entitlement 但 uid=mobile 时，能杀 mobile 进程（SpringBoard/cfprefsd），
+    /// 却无法结束 backboardd 这种跨用户平台守护——这是「注销有效但分辨率不生效」的根因。
+    static var isRealSetuidRoot: Bool {
+        guard let p = bundleHelperPath else { return false }
+        let st = inspect(p)
+        return st.exists && st.uid == 0 && st.isSetUID
+    }
+
+    /// 是否存在可结束 backboardd 的 root 通道。
+    /// 以真正 setuid-root 为准；entitlement 单独存在不算（mobile 身份不够）。
     static var hasRootChannel: Bool {
-        hasPrivilegedHelper || helperHasRootEntitlements
+        isRealSetuidRoot
+    }
+
+    /// 面向用户的安装状态提示
+    static var installGuidance: String? {
+        guard let p = bundleHelperPath else {
+            return "包内缺少 killall，构建不完整。"
+        }
+        let st = inspect(p)
+        if st.exists && st.uid == 0 && st.isSetUID {
+            return nil  // 已正确 root 化
+        }
+        if st.exists {
+            return "killall 当前 uid=\(st.uid.map(String.init) ?? "?")、无 setuid-root（以 mobile 身份运行，无法结束 backboardd）。这通常是覆盖升级安装导致 TrollStore 未执行 root 化。请在 TrollStore 中先卸载本 App，再全新安装本版本。"
+        }
+        return nil
     }
 
     /// root 执行链总体是否「有希望」（存在可执行 killall，无论是否 setuid，

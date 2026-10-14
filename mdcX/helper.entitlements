@@ -9,5 +9,25 @@
 	<true/>
 	<key>task_for_pid-allow</key>
 	<true/>
+	<!-- 结束/控制平台系统守护进程（backboardd 由 backboardd 用户运行，
+	     仅 root 身份无权 kill，需要进程控制私有授权） -->
+	<key>com.apple.private.coreservices.canmodifyapplicationrecords</key>
+	<true/>
+	<key>com.apple.coreaudio.allow-amr-decode</key>
+	<true/>
+	<key>com.apple.backboardd.launchapplications</key>
+	<true/>
+	<key>com.apple.backboardd.client</key>
+	<true/>
+	<key>com.apple.backboardd.debugapplications</key>
+	<true/>
+	<key>com.apple.springboard.launchapplications</key>
+	<true/>
+	<key>com.apple.springboard.debugapplications</key>
+	<true/>
+	<key>com.apple.springboard.processassertions</key>
+	<true/>
+	<key>com.apple.private.skip-library-validation</key>
+	<true/>
 </dict>
 </plist>

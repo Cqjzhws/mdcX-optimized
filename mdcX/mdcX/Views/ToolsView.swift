@@ -57,11 +57,30 @@ struct ToolsView: View {
 
             // MARK: root 执行链诊断
             Section {
+                // 关键：真正的 setuid-root 状态（决定能否杀 backboardd）
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: RootProc.isRealSetuidRoot ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(RootProc.isRealSetuidRoot ? .green : .orange)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("killall 真实 root（uid=0 + setuid）")
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundColor(.white.opacity(0.9))
+                        Text(RootProc.isRealSetuidRoot
+                             ? "已 root 化，可结束 backboardd，分辨率可生效。"
+                             : "未 root 化：只能注销，分辨率无法生效。需在 TrollStore 卸载后全新安装本版本。")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(RootProc.isRealSetuidRoot ? .green : .orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 4)
+
                 HStack(spacing: 6) {
                     Image(systemName: RootProc.helperHasRootEntitlements ? "checkmark.seal.fill" : "xmark.seal")
                         .font(.system(size: 12))
                         .foregroundColor(RootProc.helperHasRootEntitlements ? .green : .red)
-                    Text("killall 内嵌 root entitlement")
+                    Text("killall 内嵌特权 entitlement")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white.opacity(0.85))
                     Spacer()

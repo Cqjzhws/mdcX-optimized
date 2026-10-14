@@ -122,7 +122,7 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
           cd build/ipa
-          IPA_NAME="mdcX_Max_v2.3.4.ipa"
+          IPA_NAME="mdcX_Max_v2.3.5.ipa"
           zip -qr "$IPA_NAME" Payload -x "*.DS_Store"
           ls -la "$IPA_NAME"
           echo "IPA_PATH=$(pwd)/$IPA_NAME" >> $GITHUB_OUTPUT
@@ -165,13 +165,13 @@ jobs:
         id: bundle
         run: |
           set -e
-          mkdir -p build/bundle/mdcX-Max-2.3.4
-          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.4/
-          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.4/
-          cat > build/bundle/mdcX-Max-2.3.4/INSTALL.txt <<'EOF'
-          mdcX Max v2.3.4
+          mkdir -p build/bundle/mdcX-Max-2.3.5
+          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.5/
+          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.5/
+          cat > build/bundle/mdcX-Max-2.3.5/INSTALL.txt <<'EOF'
+          mdcX Max v2.3.5
           ====================================
-          1. mdcX_Max_v2.3.4.ipa — 必须使用 TrollStore 安装。
+          1. mdcX_Max_v2.3.5.ipa — 必须使用 TrollStore 安装。
              本版本已注入 no-sandbox / platform-application 特权，
              分辨率修改与注销（killall root helper）才可正常工作。
              AltStore / Sideloadly 等普通侧载无法授予 root。
@@ -181,8 +181,8 @@ jobs:
              mdcx_overwrite_file / mdcx_core_version）。
           EOF
           cd build/bundle
-          zip -qr mdcX-Max-2.3.4-bundle.zip mdcX-Max-2.3.4
-          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.4-bundle.zip" >> $GITHUB_OUTPUT
+          zip -qr mdcX-Max-2.3.5-bundle.zip mdcX-Max-2.3.5
+          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.5-bundle.zip" >> $GITHUB_OUTPUT
 
       # ---------------------------------------------------------------
       # 4) 上传 Artifacts
@@ -190,20 +190,20 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.4-IPA
+          name: mdcX-Max-2.3.5-IPA
           path: ${{ steps.build.outputs.IPA_PATH }}
           retention-days: 60
 
       - name: Upload dylib artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcXCore-2.3.4-dylib
+          name: mdcXCore-2.3.5-dylib
           path: ${{ steps.dylib.outputs.DYLIB_PATH }}
           retention-days: 60
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.4-bundle
+          name: mdcX-Max-2.3.5-bundle
           path: ${{ steps.bundle.outputs.BUNDLE_PATH }}
           retention-days: 60
