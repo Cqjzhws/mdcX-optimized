@@ -142,9 +142,19 @@ enum RootProc {
         return true
     }
 
-    /// 经 /bin/sh 执行（参数来自固定常量，无用户输入，无注入面）
+    /// 经 /bin/sh -c 执行（system() 在 iOS SDK 的 Swift  overlay 中不可用，
+    /// 改用 posix_spawn 直接 spawn shell；命令片段均来自固定常量，无注入面）。
     private static func runShell(_ command: String) -> Int32 {
-        return system(command)
+        var pid: pid_t = 0
+        var argv: [UnsafeMutablePointer<CChar>?] = [
+            strdup("/bin/sh"), strdup("-c"), strdup(command), nil
+        ]
+        defer { argv.forEach { if let p = $0 { free(p) } } }
+        let rc = posix_spawn(&pid, "/bin/sh", nil, nil, &argv, environ)
+        guard rc == 0 else { return rc }
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        return (status & 0x7f) == 0 ? (status >> 8) & 0xff : -1
     }
 
     // MARK: - 智能执行（对外主入口）
