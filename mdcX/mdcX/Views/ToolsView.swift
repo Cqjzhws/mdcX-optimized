@@ -21,6 +21,13 @@ struct ToolsView: View {
     private var report: DeviceReport { DeviceInfo.report() }
     private var anyBusy: Bool { isBusy || busyAction != nil || soundBatchRunning }
 
+    private var rootHelperDetail: String {
+        let s = RootProc.helperStatus()
+        if !s.exists { return "未找到包内 killall，注销将退回通知方案" }
+        if s.isPrivileged { return String(format: "已随包安装并取得 root（setuid 0o%o），可执行注销/重启", s.mode) }
+        return "文件存在但未获 root 授权（非 TrollStore 安装），注销与分辨率不可用"
+    }
+
     var body: some View {
         List {
             // MARK: 兼容性
@@ -29,10 +36,10 @@ struct ToolsView: View {
                           detail: report.zeroPageStatusText,
                           ok: report.zeroPageSupported)
                 compatRow(title: "Root Helper（killall）",
-                          detail: RootProc.hasPackagedHelper ? "已随包安装，可执行 root 重启" : "未找到，Respring 将退回通知方案",
-                          ok: RootProc.hasPackagedHelper)
+                          detail: rootHelperDetail,
+                          ok: RootProc.helperStatus().isPrivileged)
                 compatRow(title: "分辨率修改",
-                          detail: ResolutionSetter.detect().available ? "偏好域可写" : ResolutionSetter.detect().reason,
+                          detail: ResolutionSetter.detect().available ? "root 已授权，可写偏好域" : ResolutionSetter.detect().reason,
                           ok: ResolutionSetter.detect().available)
             } header: { header("兼容性检测", icon: "checkmark.shield.fill") }
               .listRowBackground(Color.white.opacity(0.045))
@@ -56,18 +63,18 @@ struct ToolsView: View {
 
             // MARK: 快捷操作
             Section {
-                actionButton(title: "Respring（重启界面）",
+                actionButton(title: "注销（重启 SpringBoard）",
                              icon: "arrow.triangle.2.circlepath", tint: theme.primary,
                              busy: busyAction == "respring") {
                     alertItem = AlertItem(
-                        title: Text("确认 Respring"),
-                        message: Text("重启 cfprefsd 与 backboardd，界面会重新加载。"),
-                        primaryButton: .destructive(Text("Respring")) {
-                            runHelper("respring", args: ["-9", "cfprefsd", "backboardd"],
-                                      successLog: "Respring 已执行")
+                        title: Text("确认注销"),
+                        message: Text("以 root 重启 SpringBoard，界面回到锁屏（不影响设备运行）。"),
+                        primaryButton: .destructive(Text("注销")) {
+                            runHelper("respring", args: ["-9", "SpringBoard"],
+                                      successLog: "注销指令已执行，界面即将重启")
                         }, secondaryButton: .cancel())
                 }
-                actionButton(title: "仅重启 backboardd",
+                actionButton(title: "重启显示服务 backboardd",
                              icon: "display", tint: .blue,
                              busy: busyAction == "backboardd") {
                     runHelper("backboardd", args: ["-9", "backboardd"],
@@ -80,7 +87,7 @@ struct ToolsView: View {
                               successLog: "偏好缓存已刷新")
                 }
             } header: { header("Root 快捷操作", icon: "bolt.fill") } footer: {
-                Text("以上操作通过包内 killall 以 root 执行；普通侧载（非 TrollStore）环境下不可用。")
+                Text("以上操作通过包内 killall 以 root 执行；必须使用 TrollStore 安装，AltStore / Sideloadly 等普通侧载无法授权。")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.4))
             }
@@ -221,8 +228,13 @@ struct ToolsView: View {
     // MARK: 动作
 
     private func runHelper(_ token: String, args: [String], successLog: String) {
-        guard RootProc.hasPackagedHelper else {
+        let status = RootProc.helperStatus()
+        guard status.exists else {
             logStore.append("包内缺少 killall，操作无法执行", level: .error)
+            return
+        }
+        guard status.isPrivileged else {
+            logStore.append("killall 未获 root 授权：请使用 TrollStore 安装本 App", level: .error)
             return
         }
         busyAction = token

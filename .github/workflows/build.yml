@@ -56,7 +56,7 @@ jobs:
             exit 1
           fi
 
-          echo "Archive OK. Packing IPA manually..."
+          echo "Archive OK."
 
           APP_PATH=$(find build/mdcX.xcarchive/Products/Applications -name "*.app" -maxdepth 1 -type d | head -1)
           if [ -z "$APP_PATH" ]; then
@@ -64,12 +64,30 @@ jobs:
             ls -la build/mdcX.xcarchive/Products/Applications/ || echo "No Applications dir"
             exit 1
           fi
-
           echo "Found app: $APP_PATH"
+
+          # -----------------------------------------------------------
+          # 注入 TrollStore 特权 entitlements（关键！）
+          # 不注入时 App 即使经 TrollStore 安装仍被沙盒限制，
+          # 无法写 /var/mobile/Library/Preferences，分辨率/注销全部失效。
+          # TrollStore 安装时会保留二进制内嵌的 entitlements 并重新签发。
+          # -----------------------------------------------------------
+          ENT_FILE="${GITHUB_WORKSPACE}/mdcX/mdcX.entitlements"
+          echo "Injecting entitlements: $ENT_FILE"
+          codesign --force --sign - --entitlements "$ENT_FILE" "$APP_PATH/mdcX"
+          # killall 做 ad-hoc 签名；root/setuid 由 TrollStore 按 TSRootBinaries 在安装时设置
+          codesign --force --sign - "$APP_PATH/killall"
+          chmod 755 "$APP_PATH/killall"
+
+          echo "== Embedded entitlements =="
+          codesign -d --entitlements - "$APP_PATH/mdcX" 2>&1 | head -40 || true
+          ls -la "$APP_PATH"
+
+          echo "Packing IPA manually..."
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
           cd build/ipa
-          IPA_NAME="mdcX_Max_v2.3.0.ipa"
+          IPA_NAME="mdcX_Max_v2.3.1.ipa"
           zip -qr "$IPA_NAME" Payload -x "*.DS_Store"
           ls -la "$IPA_NAME"
           echo "IPA_PATH=$(pwd)/$IPA_NAME" >> $GITHUB_OUTPUT
@@ -99,7 +117,6 @@ jobs:
             -o build/dylib/mdcXCore.dylib \
             dylib/mdcx_core.c
 
-          # ad-hoc 签名，便于与未签名 App 一起在 TrollStore 环境加载
           codesign --sign - --force --timestamp=none build/dylib/mdcXCore.dylib || true
 
           xcrun -sdk iphoneos lipo -info build/dylib/mdcXCore.dylib || file build/dylib/mdcXCore.dylib
@@ -113,21 +130,24 @@ jobs:
         id: bundle
         run: |
           set -e
-          mkdir -p build/bundle/mdcX-Max-2.3.0
-          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.0/
-          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.0/
-          cat > build/bundle/mdcX-Max-2.3.0/INSTALL.txt <<'EOF'
-          mdcX Max v2.3.0
+          mkdir -p build/bundle/mdcX-Max-2.3.1
+          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.1/
+          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.1/
+          cat > build/bundle/mdcX-Max-2.3.1/INSTALL.txt <<'EOF'
+          mdcX Max v2.3.1
           ====================================
-          1. mdcX_Max_v2.3.0.ipa — 未签名 App，请使用 TrollStore（iOS 14.0-16.6.1 等支持版本）
-             或 AltStore / Sideloadly 安装。文件清零功能仅 iOS 14.0-16.1.2 有效；
-             分辨率模块依赖 TrollStore root helper。
-          2. mdcXCore.dylib — arm64 核心利用库，可 dlopen 调用或经 insert_dylib 注入
-             （导出 mdcx_zero_file / mdcx_overwrite_file / mdcx_core_version）。
+          1. mdcX_Max_v2.3.1.ipa — 必须使用 TrollStore 安装。
+             本版本已注入 no-sandbox / platform-application 特权，
+             分辨率修改与注销（killall root helper）才可正常工作。
+             AltStore / Sideloadly 等普通侧载无法授予 root。
+             文件清零功能仅 iOS 14.0-16.1.2 有效；
+             分辨率/注销支持所有 TrollStore 可安装版本（含 iOS 16.2）。
+          2. mdcXCore.dylib — arm64 核心利用库（导出 mdcx_zero_file /
+             mdcx_overwrite_file / mdcx_core_version）。
           EOF
           cd build/bundle
-          zip -qr mdcX-Max-2.3.0-bundle.zip mdcX-Max-2.3.0
-          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.0-bundle.zip" >> $GITHUB_OUTPUT
+          zip -qr mdcX-Max-2.3.1-bundle.zip mdcX-Max-2.3.1
+          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.1-bundle.zip" >> $GITHUB_OUTPUT
 
       # ---------------------------------------------------------------
       # 4) 上传 Artifacts
@@ -135,58 +155,20 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.0-IPA
+          name: mdcX-Max-2.3.1-IPA
           path: ${{ steps.build.outputs.IPA_PATH }}
           retention-days: 60
 
       - name: Upload dylib artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcXCore-2.3.0-dylib
+          name: mdcXCore-2.3.1-dylib
           path: ${{ steps.dylib.outputs.DYLIB_PATH }}
           retention-days: 60
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.0-bundle
+          name: mdcX-Max-2.3.1-bundle
           path: ${{ steps.bundle.outputs.BUNDLE_PATH }}
           retention-days: 60
-
-      # ---------------------------------------------------------------
-      # 5) Release
-      # ---------------------------------------------------------------
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v2.3.0-max
-          name: "mdcX Max v2.3.0 (Feature + Performance + UI)"
-          body: |
-            ## mdcX Max v2.3.0 — 功能增强 · 性能优化 · 界面重做
-
-            ### 新增功能
-            - **25 个定制项**：原 16 项全部保留，新增支付/邮件/通话/拨号键盘等 9 组系统音静音与控制中心、海报背景等视觉项
-            - **自动备份与一键还原**：应用前自动备份原始文件，支持单项长按恢复 / 工具箱全部还原（覆盖写原语）
-            - **搜索 + 分类筛选 + 收藏**，状态记录本地持久化
-            - **一键推荐优化 / 一键全部静音 / 批量执行**
-            - **工具箱**：兼容性检测、设备信息、root 快捷操作（Respring / backboardd / cfprefsd）、备份管理
-            - **分辨率模块扩充到 8 个机型预设**（含 iPhone 16 Pro Max 1320×2868）
-            - **mdcXCore.dylib**：独立 arm64 核心库，可注入 / dlopen
-
-            ### 性能优化
-            - 文件操作信号量限流（4 并发），批量执行不再冲击内存
-            - 目标文件存在性预检（不存在按 Skipped 计）
-            - 日志环形缓冲 + 150ms 合并发布，杜绝列表卡顿
-            - 能力探测结果缓存、注册表静态化、Release 静默 NSLog
-
-            ### 界面美化
-            - 深色玻璃拟态 + 6 套主题渐变强调色
-            - Hero 状态卡（零页/root 兼容状态 + 会话统计）
-            - 全新卡片列表、终端日志控制台（级别配色 / 复制 / 自动滚动开关）
-            - 全局动画速度三档（极速 0.06s 起）
-
-            ⚠️ 未签名，需 TrollStore / AltStore / Sideloadly 安装。
-          files: |
-            ${{ steps.build.outputs.IPA_PATH }}
-            ${{ steps.dylib.outputs.DYLIB_PATH }}
-            ${{ steps.bundle.outputs.BUNDLE_PATH }}

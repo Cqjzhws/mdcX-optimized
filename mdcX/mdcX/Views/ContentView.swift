@@ -194,15 +194,16 @@ struct ContentView: View {
         isRespringProcessing = true
         onBusyChange(true)
 
-        if RootProc.hasPackagedHelper {
-            logStore.append("通过包内 killall（root）重启 cfprefsd / backboardd …")
+        let status = RootProc.helperStatus()
+        if status.isPrivileged {
+            logStore.append("通过 root killall 重启 SpringBoard（注销）…")
             DispatchQueue.global(qos: .userInitiated).async {
                 let ok = RootProc.respring()
                 DispatchQueue.main.async {
                     if ok {
-                        logStore.append("Respring 已执行", level: .success)
+                        logStore.append("注销指令已执行，界面即将重启", level: .success)
                     } else {
-                        logStore.append("包内 killall 执行失败，尝试 CFNotification 方案…", level: .warn)
+                        logStore.append("killall 执行失败，尝试 CFNotification 方案…", level: .warn)
                         RespringHelper.attemptDarwinRespring()
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
@@ -212,11 +213,14 @@ struct ContentView: View {
                 }
             }
         } else {
-            logStore.append("未找到包内 killall，尝试 CFNotification 方案（部分版本无效）", level: .warn)
+            logStore.append(status.exists
+                            ? "killall 未获 root 授权（请用 TrollStore 安装），尝试 CFNotification 方案…"
+                            : "未找到包内 killall，尝试 CFNotification 方案…",
+                            level: .warn)
             DispatchQueue.global(qos: .userInitiated).async {
                 RespringHelper.attemptDarwinRespring()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                    logStore.append("CFNotification 已发送", level: .info)
+                    logStore.append("CFNotification 已发送（若界面未重启，说明当前环境需要 TrollStore）", level: .info)
                     isRespringProcessing = false
                     onBusyChange(false)
                 }
@@ -246,12 +250,13 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
+                    let privileged = RootProc.helperStatus().isPrivileged
                     alertItem = AlertItem(
-                        title: Text("确认 Respring"),
-                        message: Text(RootProc.hasPackagedHelper
-                                      ? "将以 root 权限重启 cfprefsd 与 backboardd，界面会重新加载。"
-                                      : "未找到包内 killall，将使用 CFNotification 方案，在部分 iOS 版本上可能无效。"),
-                        primaryButton: .destructive(Text("Respring")) { triggerRespring() },
+                        title: Text("确认注销"),
+                        message: Text(privileged
+                                      ? "将通过 root killall 重启 SpringBoard，界面回到锁屏。"
+                                      : "当前 killall 未获 root 授权，将尝试 CFNotification 方案，多数 iOS 版本上无效。建议改用 TrollStore 安装。"),
+                        primaryButton: .destructive(Text("注销")) { triggerRespring() },
                         secondaryButton: .cancel())
                 } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
@@ -342,7 +347,7 @@ struct ContentView: View {
             HStack(spacing: 7) {
                 statusDot(ok: report.zeroPageSupported,
                           text: report.zeroPageSupported ? "零页利用可用" : "零页已修补")
-                statusDot(ok: RootProc.hasPackagedHelper, text: "Root Helper")
+                statusDot(ok: RootProc.helperStatus().isPrivileged, text: "Root 授权")
                 Spacer()
                 StatPill(icon: "checkmark", value: sessionOK, tint: .green)
                 StatPill(icon: "xmark", value: sessionFail, tint: .red)

@@ -81,26 +81,32 @@ enum ResolutionSetter {
     static func detect() -> Capability {
         if let cached = cachedCapability { return cached }
         let result: Capability
-        guard RootProc.hasPackagedHelper else {
+
+        let status = RootProc.helperStatus()
+        guard status.exists else {
             result = Capability(
                 available: false,
-                reason: "App 包内未找到 killall 提权工具。\n"
-                      + "请确认构建时已执行 copy-helper.sh，且 Info.plist 声明了 TSRootBinaries。")
+                reason: "App 包内未找到 killall 提权工具，构建产物不完整。")
             cachedCapability = result
             return result
         }
-        let preferencesDirectory = (preferencesPath as NSString).deletingLastPathComponent
-        guard FileManager.default.isWritableFile(atPath: preferencesDirectory) else {
+        guard status.isPrivileged else {
             result = Capability(
                 available: false,
-                reason: "无 root 权限，无法写入系统偏好域。\n"
-                      + "请通过 TrollStore 安装，并确认设备已授予相关权限。")
+                reason: "killall 未获得 root 授权（缺少 setuid-root 标记）。\n"
+                      + "这通常意味着当前不是通过 TrollStore 安装：AltStore / Sideloadly / "
+                      + "证书侧载都无法授予 root。请改用 TrollStore 安装本 IPA。")
             cachedCapability = result
             return result
         }
-        result = Capability(available: true, reason: "可用")
+        result = Capability(available: true, reason: "可用（root helper 已授权）")
         cachedCapability = result
         return result
+    }
+
+    /// 系统画布 plist 是否存在（未修改过分辨率的设备上该文件可能尚未生成）。
+    static var canvasPlistExists: Bool {
+        FileManager.default.fileExists(atPath: preferencesPath)
     }
 
     // MARK: - 当前分辨率
@@ -165,7 +171,13 @@ enum ResolutionSetter {
         // 首次修改前备份系统原值，供「还原」使用。
         backupOriginalIfNeeded()
 
-        guard let plist = NSMutableDictionary(contentsOfFile: preferencesPath) else {
+        // 该 plist 在从未修改过分辨率的设备上可能尚未生成，此时以空字典创建。
+        let plist: NSMutableDictionary
+        if let existing = NSMutableDictionary(contentsOfFile: preferencesPath) {
+            plist = existing
+        } else if !canvasPlistExists {
+            plist = NSMutableDictionary()
+        } else {
             return .plistUnreadable("无法读取 \(preferencesPath)")
         }
 
@@ -173,11 +185,11 @@ enum ResolutionSetter {
         plist[heightKey] = NSNumber(value: height)
 
         guard plist.write(toFile: preferencesPath, atomically: true) else {
-            return .writeFailed("写入失败，请确认具备 root 权限。")
+            return .writeFailed("写入失败：App 仍处于沙盒中或无目录写权限，请确认使用的是本版本且经 TrollStore 安装。")
         }
 
         // 刷新偏好缓存 + 重启显示服务使其生效。
-        RootProc.runHelper(arguments: ["-9", "cfprefsd", "backboardd"])
+        RootProc.restartBackboard()
 
         return .ok
     }
@@ -202,7 +214,7 @@ enum ResolutionSetter {
             return .writeFailed("写回失败：\(error.localizedDescription)")
         }
 
-        RootProc.runHelper(arguments: ["-9", "cfprefsd", "backboardd"])
+        RootProc.restartBackboard()
         return .ok
     }
 

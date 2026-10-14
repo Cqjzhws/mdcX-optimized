@@ -44,7 +44,8 @@ struct ResolutionView: View {
             // 状态
             Section {
                 stateRow(icon: "display", tint: theme.primary, title: "当前画布",
-                         value: current.map { "\($0.width) × \($0.height)" } ?? "读取失败",
+                         value: current.map { "\($0.width) × \($0.height)" }
+                                ?? (ResolutionSetter.canvasPlistExists ? "读取失败" : "系统默认（未自定义）"),
                          mono: true)
                 HStack {
                     InfoRow(icon: "externaldrive.fill", tint: .green,
