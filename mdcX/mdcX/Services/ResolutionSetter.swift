@@ -78,28 +78,33 @@ enum ResolutionSetter {
 
     private static var cachedCapability: Capability?
 
+    /// 能力判断：能否写偏好域取决于沙盒是否解除（entitlements/TrollStore）。
+    /// root helper 的状态单独在工具箱展示，因为「写 plist」与「杀进程」是两步。
     static func detect() -> Capability {
         if let cached = cachedCapability { return cached }
         let result: Capability
 
-        let status = RootProc.helperStatus()
-        guard status.exists else {
+        let preferencesDirectory = (preferencesPath as NSString).deletingLastPathComponent
+        let writable = FileManager.default.isWritableFile(atPath: preferencesDirectory)
+
+        // 进一步：试着判断进程是否脱离沙盒（容器外目录可达）
+        let sandboxSign = FileManager.default.fileExists(atPath: "/var/mobile/Library/Preferences")
+
+        guard sandboxSign else {
             result = Capability(
                 available: false,
-                reason: "App 包内未找到 killall 提权工具，构建产物不完整。")
+                reason: "无法访问系统偏好目录，App 仍在沙盒中。请使用本版本 IPA 并通过 TrollStore 安装。")
             cachedCapability = result
             return result
         }
-        guard status.isPrivileged else {
+        guard writable else {
             result = Capability(
                 available: false,
-                reason: "killall 未获得 root 授权（缺少 setuid-root 标记）。\n"
-                      + "这通常意味着当前不是通过 TrollStore 安装：AltStore / Sideloadly / "
-                      + "证书侧载都无法授予 root。请改用 TrollStore 安装本 IPA。")
+                reason: "系统偏好目录不可写。请确认经 TrollStore 安装且版本为 2.3.2+。")
             cachedCapability = result
             return result
         }
-        result = Capability(available: true, reason: "可用（root helper 已授权）")
+        result = Capability(available: true, reason: "偏好域可写（应用后将尝试 root 重启显示服务）")
         cachedCapability = result
         return result
     }
@@ -133,6 +138,8 @@ enum ResolutionSetter {
         case missingHelper
         case plistUnreadable(String)
         case writeFailed(String)
+        /// plist 已写入，但重启显示服务失败（killall 未提权）。需用户手动注销/重启。
+        case restartFailed(String)
     }
 
     /// 取值范围校验（纯函数，不产生任何副作用）。
@@ -162,8 +169,6 @@ enum ResolutionSetter {
     /// 应用指定分辨率。
     /// - Important: 调用方负责保证与零页操作互斥（两者都会重启 backboardd）。
     static func apply(width: Int, height: Int) -> ApplyResult {
-        guard RootProc.hasPackagedHelper else { return .missingHelper }
-
         if let reason = validate(width: width, height: height) {
             return .outOfRange(reason)
         }
@@ -189,7 +194,11 @@ enum ResolutionSetter {
         }
 
         // 刷新偏好缓存 + 重启显示服务使其生效。
-        RootProc.restartBackboard()
+        let report = RootProc.restartBackboard()
+        if !report.succeeded {
+            // 配置已落盘；只要随后注销/重启设备仍会生效
+            return .restartFailed(report.detail)
+        }
 
         return .ok
     }
@@ -199,8 +208,6 @@ enum ResolutionSetter {
     /// 还原为修改前的原始分辨率（从备份写回）。
     /// - Note: 若备份不存在，则提示用户重启设备还原。
     static func restore() -> ApplyResult {
-        guard RootProc.hasPackagedHelper else { return .missingHelper }
-
         let fm = FileManager.default
         guard fm.fileExists(atPath: backupPath) else {
             return .writeFailed("未找到原始配置备份。\n重启设备即可还原为原生分辨率。")
@@ -214,7 +221,10 @@ enum ResolutionSetter {
             return .writeFailed("写回失败：\(error.localizedDescription)")
         }
 
-        RootProc.restartBackboard()
+        let report = RootProc.restartBackboard()
+        if !report.succeeded {
+            return .restartFailed(report.detail)
+        }
         return .ok
     }
 

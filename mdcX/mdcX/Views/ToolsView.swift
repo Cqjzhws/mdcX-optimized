@@ -22,10 +22,18 @@ struct ToolsView: View {
     private var anyBusy: Bool { isBusy || busyAction != nil || soundBatchRunning }
 
     private var rootHelperDetail: String {
-        let s = RootProc.helperStatus()
-        if !s.exists { return "未找到包内 killall，注销将退回通知方案" }
-        if s.isPrivileged { return String(format: "已随包安装并取得 root（setuid 0o%o），可执行注销/重启", s.mode) }
-        return "文件存在但未获 root 授权（非 TrollStore 安装），注销与分辨率不可用"
+        if RootProc.hasPrivilegedHelper {
+            return "检测到 setuid-root killall，可执行注销/重启显示服务"
+        }
+        if RootProc.anyExecutableHelper {
+            return "找到 killall 但都不是 root 所有/无 setuid 位，将尝试 shell 方案，可能失败"
+        }
+        return "未找到任何可执行 killall"
+    }
+
+    /// 诊断用：所有候选路径的特权状态
+    private var candidateStates: [RootProc.FilePrivilege] {
+        RootProc.allCandidates().map { RootProc.inspect($0) }
     }
 
     var body: some View {
@@ -37,12 +45,55 @@ struct ToolsView: View {
                           ok: report.zeroPageSupported)
                 compatRow(title: "Root Helper（killall）",
                           detail: rootHelperDetail,
-                          ok: RootProc.helperStatus().isPrivileged)
+                          ok: RootProc.hasPrivilegedHelper)
                 compatRow(title: "分辨率修改",
-                          detail: ResolutionSetter.detect().available ? "root 已授权，可写偏好域" : ResolutionSetter.detect().reason,
+                          detail: ResolutionSetter.detect().available ? "偏好域可写（重启显示服务需要 root）" : ResolutionSetter.detect().reason,
                           ok: ResolutionSetter.detect().available)
             } header: { header("兼容性检测", icon: "checkmark.shield.fill") }
               .listRowBackground(Color.white.opacity(0.045))
+
+            // MARK: root 执行链诊断
+            Section {
+                ForEach(candidateStates, id: \.path) { st in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Image(systemName: st.looksPrivileged ? "checkmark.seal.fill" :
+                                              (st.isExecutable ? "questionmark.circle.fill" : "xmark.circle.fill"))
+                                .font(.system(size: 12))
+                                .foregroundColor(st.looksPrivileged ? .green :
+                                                 (st.isExecutable ? .orange : .red))
+                            Text(st.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.85))
+                                .lineLimit(2)
+                        }
+                        Text(st.shortMode)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.45))
+                            .padding(.leading, 18)
+                    }
+                    .padding(.vertical, 3)
+                }
+                Button {
+                    testExecChain()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if busyAction == "chaintest" { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "stethoscope").font(.system(size: 13, weight: .bold))
+                        Text(busyAction == "chaintest" ? "检测中…" : "执行链自检（不杀进程）").bold()
+                        Spacer()
+                    }
+                }
+                .buttonStyle(CustomButtonStyle(color: theme.primary))
+                .disabled(anyBusy)
+                .listRowBackground(Color.clear)
+            } header: { header("Root 执行链诊断", icon: "doc.text.magnifyingglass") } footer: {
+                Text("绿色 seal = root:wheel 且带 setuid 位（可用）；橙色 = 可执行但未提权；红色 = 不可用。自检用 killall -s 只匹配不发信号。")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .listRowBackground(Color.white.opacity(0.045))
 
             // MARK: 设备信息
             Section {
@@ -228,26 +279,39 @@ struct ToolsView: View {
     // MARK: 动作
 
     private func runHelper(_ token: String, args: [String], successLog: String) {
-        let status = RootProc.helperStatus()
-        guard status.exists else {
-            logStore.append("包内缺少 killall，操作无法执行", level: .error)
-            return
-        }
-        guard status.isPrivileged else {
-            logStore.append("killall 未获 root 授权：请使用 TrollStore 安装本 App", level: .error)
-            return
-        }
         busyAction = token
         isBusy = true
+        logStore.append("执行：\(args.joined(separator: " "))")
         DispatchQueue.global(qos: .userInitiated).async {
-            let ok = RootProc.runHelper(arguments: args)
+            let report = RootProc.execute(arguments: args)
             DispatchQueue.main.async {
                 busyAction = nil
                 isBusy = false
-                if ok {
-                    logStore.append(successLog, level: .success)
+                if report.succeeded {
+                    logStore.append("\(successLog)（\(report.method)）", level: .success)
                 } else {
-                    logStore.append("操作失败（\(args.last ?? "")）", level: .error)
+                    logStore.append("操作失败：\(report.detail)", level: .error)
+                    logStore.append("已尝试路径：\(report.triedPaths.joined(separator: "；"))", level: .warn)
+                }
+            }
+        }
+    }
+
+    /// 执行链自检：killall -s backboardd 只列出匹配进程、不发信号
+    private func testExecChain() {
+        busyAction = "chaintest"
+        isBusy = true
+        logStore.append("开始 root 执行链自检…")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let report = RootProc.execute(arguments: ["-s", "backboardd"])
+            DispatchQueue.main.async {
+                busyAction = nil
+                isBusy = false
+                if report.succeeded {
+                    self.logStore.append("自检：killall 可运行（\(report.method)）路径：\(report.usedPath ?? "?")", level: .success)
+                    self.logStore.append("注意：能运行不代表已 root；真正的 root 标志是诊断面板里的绿色 seal。", level: .info)
+                } else {
+                    self.logStore.append("自检失败：\(report.detail)", level: .error)
                 }
             }
         }

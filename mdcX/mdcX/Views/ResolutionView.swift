@@ -276,6 +276,14 @@ struct ResolutionView: View {
             logStore.append("[分辨率] 失败：\(reason)", level: .error)
         case .writeFailed(let reason):
             logStore.append("[分辨率] 失败：\(reason)", level: .error)
+        case .restartFailed(let detail):
+            logStore.append("[分辨率] 配置已写入，但无法自动重启显示服务：\(detail)", level: .warn)
+            logStore.append("[分辨率] 请到工具箱点「注销」，或手动重启手机后生效。", level: .info)
+            alertItem = AlertItem(
+                title: Text("分辨率已写入，待生效"),
+                message: Text("画布配置已成功保存，但自动重启显示服务失败（killall 未获得 root）。\n\n请到「工具箱」点「注销」，或手动重启手机，设置即会生效。\n\n诊断：\(detail)"),
+                primaryButton: .default(Text("知道了")),
+                secondaryButton: nil)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             refresh()

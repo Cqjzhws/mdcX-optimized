@@ -194,35 +194,24 @@ struct ContentView: View {
         isRespringProcessing = true
         onBusyChange(true)
 
-        let status = RootProc.helperStatus()
-        if status.isPrivileged {
-            logStore.append("通过 root killall 重启 SpringBoard（注销）…")
-            DispatchQueue.global(qos: .userInitiated).async {
-                let ok = RootProc.respring()
-                DispatchQueue.main.async {
-                    if ok {
-                        logStore.append("注销指令已执行，界面即将重启", level: .success)
-                    } else {
-                        logStore.append("killall 执行失败，尝试 CFNotification 方案…", level: .warn)
-                        RespringHelper.attemptDarwinRespring()
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                        isRespringProcessing = false
-                        onBusyChange(false)
-                    }
+        let privileged = RootProc.hasPrivilegedHelper
+        logStore.append(privileged
+                        ? "通过 root killall 重启 SpringBoard（注销）…"
+                        : "未发现 setuid-root helper，尝试全部执行链（含 shell）…",
+                        level: .info)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let report = RootProc.respring()
+            DispatchQueue.main.async {
+                if report.succeeded {
+                    self.logStore.append("注销指令已执行（\(report.method)），界面即将重启", level: .success)
+                } else {
+                    self.logStore.append("root 注销失败：\(report.detail)", level: .error)
+                    self.logStore.append("尝试 CFNotification 方案（多数版本无效）…", level: .warn)
+                    RespringHelper.attemptDarwinRespring()
                 }
-            }
-        } else {
-            logStore.append(status.exists
-                            ? "killall 未获 root 授权（请用 TrollStore 安装），尝试 CFNotification 方案…"
-                            : "未找到包内 killall，尝试 CFNotification 方案…",
-                            level: .warn)
-            DispatchQueue.global(qos: .userInitiated).async {
-                RespringHelper.attemptDarwinRespring()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                    logStore.append("CFNotification 已发送（若界面未重启，说明当前环境需要 TrollStore）", level: .info)
-                    isRespringProcessing = false
-                    onBusyChange(false)
+                    self.isRespringProcessing = false
+                    self.onBusyChange(false)
                 }
             }
         }
@@ -250,12 +239,12 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
-                    let privileged = RootProc.helperStatus().isPrivileged
+                    let privileged = RootProc.hasPrivilegedHelper
                     alertItem = AlertItem(
                         title: Text("确认注销"),
                         message: Text(privileged
                                       ? "将通过 root killall 重启 SpringBoard，界面回到锁屏。"
-                                      : "当前 killall 未获 root 授权，将尝试 CFNotification 方案，多数 iOS 版本上无效。建议改用 TrollStore 安装。"),
+                                      : "未检测到 setuid-root 的 killall，将依次尝试包内/容器/系统路径及 shell 方案；若仍无效会在日志中给出明确原因。"),
                         primaryButton: .destructive(Text("注销")) { triggerRespring() },
                         secondaryButton: .cancel())
                 } label: {
@@ -347,7 +336,8 @@ struct ContentView: View {
             HStack(spacing: 7) {
                 statusDot(ok: report.zeroPageSupported,
                           text: report.zeroPageSupported ? "零页利用可用" : "零页已修补")
-                statusDot(ok: RootProc.helperStatus().isPrivileged, text: "Root 授权")
+                statusDot(ok: RootProc.hasPrivilegedHelper,
+                          text: RootProc.hasPrivilegedHelper ? "Root 授权" : "Root 未授权")
                 Spacer()
                 StatPill(icon: "checkmark", value: sessionOK, tint: .green)
                 StatPill(icon: "xmark", value: sessionFail, tint: .red)
