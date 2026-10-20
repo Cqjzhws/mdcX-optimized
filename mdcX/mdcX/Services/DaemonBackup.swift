@@ -53,7 +53,7 @@ enum DaemonBackup {
     /// 与 TweakBackup 应做的迁移是同一件事：别把系统状态快照塞进 iTunes 备份。
     static var rootURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let url = base.appendingPathComponent("mdcx_daemon_snapshots", isDirectory: true)
+        var url = base.appendingPathComponent("mdcx_daemon_snapshots", isDirectory: true)
         if !FileManager.default.fileExists(atPath: url.path) {
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             var rv = URLResourceValues()
