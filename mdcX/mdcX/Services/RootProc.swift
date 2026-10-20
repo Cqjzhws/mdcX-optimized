@@ -346,21 +346,94 @@ enum RootProc {
 
     // MARK: - 通用 root 执行（2.4.0 · 守护进程管理与显示调节共用）
 
-    /// 系统 launchctl 的候选位置。iOS 上通常只有 /bin/launchctl 存在。
-    static let launchctlCandidates: [String] = [
-        "/bin/launchctl",
-        "/usr/bin/launchctl",
-        "/sbin/launchctl"
-    ]
+    // MARK: - 系统工具解析
 
-    /// 设备上实际可用的 launchctl，进程内只探测一次。
-    /// 拿不到就说明这套执行链在本设备上不可用，守护进程功能应当直接停用。
-    static let resolvedLaunchctlPath: String? = {
+    /// 在 iOS 的常见位置解析一个系统工具，返回第一个可执行的绝对路径。
+    ///
+    /// 不写死单一路径：iOS 各版本的 /bin、/usr/bin 布局有差异，
+    /// 且 /bin 常常是指向别处的符号链接汇合处，逐个候选试最稳。
+    static func resolveTool(_ name: String) -> String? {
         let fm = FileManager.default
-        return launchctlCandidates.first(where: { fm.isExecutableFile(atPath: $0) })
-    }()
+        for dir in ["/bin", "/usr/bin", "/sbin", "/usr/sbin"] {
+            let p = (dir as NSString).appendingPathComponent(name)
+            if fm.isExecutableFile(atPath: p) { return p }
+        }
+        return nil
+    }
 
-    /// 以 root 执行任意绝对路径的二进制（供非 killall 场景使用，如 launchctl）。
+    static let cpTool: String? = resolveTool("cp")
+    static let mvTool: String? = resolveTool("mv")
+    static let rmTool: String? = resolveTool("rm")
+
+    // MARK: - root 文件读写（守护进程的 disabled.plist 走这条路）
+
+    /// 以 root 读取任意路径的文件内容。
+    ///
+    /// App 自身跑在 mobile 用户下，/var/db 里的系统状态文件未必可读，
+    /// 必须借 root 之手把文件复制到 App 私有的临时目录再读。
+    /// 与 Geranium「root 复制到 /var/mobile/Documents」是同一个思路，
+    /// 但落点改用 App 私有临时目录 —— 不进 iTunes/iCloud 备份，也不会
+    /// 在用户文档目录里留下肉眼可见的残留。
+    static func readFileAsRoot(_ path: String) -> Data? {
+        guard let cp = cpTool else { return nil }
+        let tmp = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("mdcx_rootread_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        guard runPrivileged(cp, arguments: [path, tmp]) == 0 else { return nil }
+        return FileManager.default.contents(atPath: tmp)
+    }
+
+    /// 以 root 原子写入任意路径。
+    ///
+    /// 做法：内容先落到**目标所在目录**的临时文件，再 rename 覆盖。
+    /// 同目录才能保证第二步是原子替换；直接 `cp` 到目标的话，
+    /// 写一半失败会把系统状态文件截断，对 disabled.plist 这种文件不可接受。
+    ///
+    /// - Returns: 0 成功；-410 找不到 cp/mv；-411 本地临时文件写入失败；
+    ///            -412 复制到目标目录失败；-413 替换失败；-414 读回校验不一致
+    @discardableResult
+    static func writeFileAsRoot(_ data: Data, to path: String) -> Int32 {
+        guard let cp = cpTool, let mv = mvTool else {
+            NSLog("[RootProc] writeFileAsRoot: 找不到 cp/mv")
+            return -410
+        }
+        let dir  = (path as NSString).deletingLastPathComponent
+        let name = (path as NSString).lastPathComponent
+        let staging = (dir as NSString).appendingPathComponent(".mdcx_\(name).new")
+        let local = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("mdcx_rootwrite_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(atPath: local) }
+
+        do {
+            try data.write(to: URL(fileURLWithPath: local), options: .atomic)
+        } catch {
+            NSLog("[RootProc] writeFileAsRoot: 本地临时文件写入失败 %@", error.localizedDescription)
+            return -411
+        }
+
+        // 清掉上次可能残留的 staging，避免干扰
+        if let rm = rmTool { _ = runPrivileged(rm, arguments: ["-f", staging]) }
+
+        // 1) 复制到同目录的临时文件
+        if runPrivileged(cp, arguments: [local, staging]) != 0 {
+            NSLog("[RootProc] writeFileAsRoot: cp 到 %@ 失败", staging)
+            return -412
+        }
+        // 2) 原子替换
+        if runPrivileged(mv, arguments: ["-f", staging, path]) != 0 {
+            if let rm = rmTool { _ = runPrivileged(rm, arguments: ["-f", staging]) }
+            NSLog("[RootProc] writeFileAsRoot: mv 覆盖 %@ 失败", path)
+            return -413
+        }
+        // 3) 读回校验，确保落盘的就是要写的内容
+        guard let back = readFileAsRoot(path), back == data else {
+            NSLog("[RootProc] writeFileAsRoot: 读回校验不一致")
+            return -414
+        }
+        return 0
+    }
+
+    /// 以 root 执行任意绝对路径的二进制（cp / mv / rm 等系统工具走这里）。
     ///
     /// 与 `execute` 的区别：`execute` 是"围绕 killall 的多策略链路"，
     /// 这里则是"给定程序、给定参数"的确定性调用，不做路径猜测，也不走 shell。
@@ -392,16 +465,7 @@ enum RootProc {
         return (status >> 8) & 0xff
     }
 
-    /// 守护进程开关（launchctl disable / enable）。
-    ///
-    /// 走 Apple 官方途径而不是手写 plist：launchctl 自己负责
-    /// /var/db/com.apple.xpc.launchd/disabled.plist 的写入、权限与 migrated 标记，
-    /// 比"复制 → 改 → 移回"那一套更不容易把状态文件写坏。
-    ///
-    /// - Returns: 0 成功；-404 本设备没有可用 launchctl；其余为 launchctl 退出码。
-    @discardableResult
-    static func setServiceEnabled(_ label: String, enabled: Bool) -> Int32 {
-        guard let launchctl = resolvedLaunchctlPath else { return -404 }
-        return runPrivileged(launchctl, arguments: [enabled ? "enable" : "disable", label])
-    }
+    /// 守护进程的开关逻辑不放在这里 —— 它属于 DaemonManager 的领域知识
+    /// （disabled.plist 的键值语义），RootProc 只提供通用的 root 执行
+    /// 与 root 文件读写原语。
 }

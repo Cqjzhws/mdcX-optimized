@@ -29,14 +29,24 @@ struct ToolsView: View {
     private var anyBusy: Bool { isBusy || busyAction != nil || soundBatchRunning }
 
     private var rootHelperDetail: String {
+        // root 的真正来源是主程序的 persona-mgmt：子进程以 uid 0 启动，
+        // killall 自身既不需要 setuid 也不需要内嵌 entitlement。
+        // 2.3.x 的顺序把 killall 自己的特权排在前面，而那条在 TrollStore
+        // 途径下恒为 false，于是永远显示"无法结束系统进程"——纯误导。
+        if RootProc.hasPersonaEntitlement && RootProc.anyExecutableHelper {
+            return "killall 由主程序以 root 启动（persona-mgmt），可注销/重启显示服务"
+        }
         if RootProc.helperHasRootEntitlements {
-            return "killall 内嵌 root 特权 entitlement（TrollStore 授权），可注销/重启显示服务"
+            return "killall 内嵌 root 特权 entitlement，可注销/重启显示服务"
         }
         if RootProc.hasPrivilegedHelper {
             return "检测到 setuid-root killall，可执行注销/重启显示服务"
         }
+        if RootProc.hasPersonaEntitlement {
+            return "已具备 root 授权（persona-mgmt），但包内未找到可执行的 killall"
+        }
         if RootProc.anyExecutableHelper {
-            return "找到 killall 但无 root 特权（无 setuid/无 entitlement），无法结束系统进程"
+            return "找到 killall 但无 root 通道（需经 TrollStore 安装以授予 persona-mgmt）"
         }
         return "未找到任何可执行 killall"
     }
@@ -86,16 +96,22 @@ struct ToolsView: View {
                 .padding(.vertical, 4)
 
                 HStack(spacing: 6) {
-                    Image(systemName: RootProc.helperHasRootEntitlements ? "checkmark.seal.fill" : "xmark.seal")
+                    // 这一行 2.3.x 写的是「killall 内嵌特权 entitlement」，
+                    // 但 killall 自己根本不需要 entitlement —— root 来自
+                    // 主程序的 persona-mgmt（子进程以 uid 0 启动）。
+                    // 于是这一行在正常的 TrollStore 安装下永远显示"缺失"，
+                    // 看着像坏了，其实上面那行才是真实状态。改为显示真实来源。
+                    Image(systemName: RootProc.hasRootChannel ? "checkmark.seal.fill" : "xmark.seal")
                         .font(.system(size: 12))
-                        .foregroundColor(RootProc.helperHasRootEntitlements ? .green : .red)
-                    Text("killall 内嵌特权 entitlement")
+                        .foregroundColor(RootProc.hasRootChannel ? .green : .red)
+                    Text("killall 特权来源")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white.opacity(0.85))
                     Spacer()
-                    Text(RootProc.helperHasRootEntitlements ? "已嵌入" : "缺失")
+                    Text(RootProc.hasPersonaEntitlement ? "persona-mgmt"
+                         : (RootProc.isRealSetuidRoot ? "setuid-root" : "缺失"))
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(RootProc.helperHasRootEntitlements ? .green : .red)
+                        .foregroundColor(RootProc.hasRootChannel ? .green : .red)
                 }
                 .padding(.vertical, 3)
                 ForEach(candidateStates, id: \.path) { st in

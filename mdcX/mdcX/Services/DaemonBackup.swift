@@ -6,7 +6,10 @@
 //
 //  与 TweakBackup 的定位差别：
 //  TweakBackup 备份的是「文件内容」，回滚靠再写一次；
-//  这里备份的是「哪些项被改成了什么」，回滚靠逐个 launchctl enable/disable。
+//  这里备份的是「哪些项被改成了什么」，回滚靠把 disabled.plist 的
+//  对应键改回原值（一次性读改写，不是逐项来回折腾）。
+//  存成 JSON 而不是直接复制 plist：人类可读、可手改，
+//  也避免把系统状态文件的权限与所有权一起搬进 App 容器。
 //
 //  为什么不做成"整个 disabled.plist 复制回来"：
 //  那样会把用户用别的方式（比如之前自己手动禁用的、或系统迁移产生的）
@@ -14,7 +17,7 @@
 //  这里记的是"这次动过的那几项，动之前是什么状态"，回滚只还原这几项。
 //
 //  同时在快照里额外存一份完整的 disabled 数据库副本作为兜底，
-//  万一 launchctl 这条路走不通，还能照着副本逐项恢复。
+//  万一主路径出问题，还能照着副本逐项恢复。
 //
 
 import Foundation
@@ -138,20 +141,24 @@ enum DaemonBackup {
 
     /// 把指定快照记录的项恢复到改动前的状态。
     ///
-    /// 走逐个 launchctl 的原路反向操作，不替换整个文件。
+    /// 与 2.4.0 首发版的差异：首发版逐个标签单独读写 plist，
+    /// 一趟回滚就是 N 次读 + N 次写。现在合成一次批量改动。
     /// 必须在后台线程调用（内部是同步的 spawn + wait）。
     @discardableResult
     static func restore(_ set: DaemonChangeSet) -> DaemonRestoreOutcome {
         var outcome = DaemonRestoreOutcome()
-        for (label, wasDisabled) in set.changes {
-            // 改动前是启用的 → 现在恢复成启用；改动前是禁用的 → 恢复成禁用
-            let code = RootProc.setServiceEnabled(label, enabled: !wasDisabled)
-            if code == 0 {
-                outcome.restored += 1
-            } else {
-                outcome.failed += 1
-                outcome.failedLabels.append(label)
-            }
+        guard !set.changes.isEmpty else { return outcome }
+
+        // 改动前是启用的 → 恢复成启用；改动前是禁用的 → 恢复成禁用
+        var mapping: [String: Bool] = [:]
+        for (label, wasDisabled) in set.changes { mapping[label] = wasDisabled }
+
+        let code = DaemonManager.applyChanges(mapping)
+        if code == 0 {
+            outcome.restored = set.changes.count
+        } else {
+            outcome.failed = set.changes.count
+            outcome.failedLabels = Array(set.changes.keys)
         }
         return outcome
     }

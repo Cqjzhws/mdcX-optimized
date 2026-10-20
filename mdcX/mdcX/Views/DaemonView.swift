@@ -341,9 +341,9 @@ struct DaemonView: View {
             requirementRow(ok: cap?.canReadSystem ?? false,
                            title: "能读 /System/Library/LaunchDaemons",
                            detail: "需要 App 脱离沙盒（no-sandbox + platform-application）")
-            requirementRow(ok: cap?.hasLaunchctl ?? false,
-                           title: "设备上存在 launchctl",
-                           detail: "iOS 自带，一般位于 /bin/launchctl")
+            requirementRow(ok: cap?.canReachDb ?? false,
+                           title: "可定位守护进程状态库",
+                           detail: "/var/db/com.apple.xpc.launchd/disabled.plist")
             requirementRow(ok: cap?.hasRoot ?? false,
                            title: "主程序具备 persona-mgmt 授权",
                            detail: "必须通过 TrollStore 安装本版本，普通侧载无法授予")
