@@ -236,19 +236,21 @@ enum DaemonManager {
         out.reserveCapacity(files.count)
         for file in files where file.hasSuffix(".plist") {
             let path = (launchDaemonsPath as NSString).appendingPathComponent(file)
-            let dict = NSDictionary(contentsOfFile: path)
-            let label = (dict?["Label"] as? String)
+            // 解析失败也要建条目，否则这里的总数会比 scanInstalledLabels 少几项，
+            // 界面上「已识别 487 项」和「全部 484 项」对不上，看着像 bug。
+            let dict = NSDictionary(contentsOfFile: path) ?? [:]
+            let label = (dict["Label"] as? String)
                 ?? (file as NSString).deletingPathExtension
-            var program = (dict?["Program"] as? String) ?? ""
+            var program = (dict["Program"] as? String) ?? ""
             if program.isEmpty,
-               let args = dict?["ProgramArguments"] as? [String],
+               let args = dict["ProgramArguments"] as? [String],
                let first = args.first {
                 program = first
             }
             // KeepAlive 既可能是 Bool 也可能是字典（按条件拉起），
             // 这里只关心"有没有配置"，非空即视为常驻
-            let runAtLoad = (dict?["RunAtLoad"] as? Bool) ?? false
-            let keepAlive = (dict?["KeepAlive"] != nil)
+            let runAtLoad = (dict["RunAtLoad"] as? Bool) ?? false
+            let keepAlive = (dict["KeepAlive"] != nil)
             out.append(DaemonInfo(label: label,
                                   plistPath: path,
                                   program: program,
