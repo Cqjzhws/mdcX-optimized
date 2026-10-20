@@ -51,14 +51,9 @@ class LogStore: ObservableObject {
     private let flushInterval: TimeInterval = 0.15
 
     @Published private(set) var entries: [LogEntry] = [
-        LogEntry(date: Date(), level: .info, text: Self.readyLine)
+        LogEntry(date: Date(), level: .info,
+                 text: "mdcX Max v\((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?") 已就绪")
     ]
-
-    /// 启动就绪日志，版本号取自 Info.plist，避免写死导致与发布版本不符。
-    private static var readyLine: String {
-        let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
-        return "mdcX Max v\(v) 已就绪"
-    }
 
     /// 兼容旧 UI 的整段文本（由 entries 派生）。
     var rendered: String {
