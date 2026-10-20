@@ -309,8 +309,9 @@ struct ContentView: View {
     // MARK: Hero
 
     private var heroCard: some View {
-        let report = DeviceInfo.report()
-        return VStack(alignment: .leading, spacing: 9) {
+        // 2.4.4：这里原本还有一颗「零页利用可用 / 零页已修补」的橙点。
+        // 本机 iOS 16.2 的零页漏洞早已修补，那颗点永远橙着，纯属碍眼，已删除。
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 11) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -334,8 +335,6 @@ struct ContentView: View {
             }
 
             HStack(spacing: 7) {
-                statusDot(ok: report.zeroPageSupported,
-                          text: report.zeroPageSupported ? "零页利用可用" : "零页已修补")
                 statusDot(ok: RootProc.hasRootChannel,
                           text: RootProc.hasRootChannel ? "Root 授权" : "Root 未授权")
                 Spacer()

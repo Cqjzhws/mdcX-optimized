@@ -186,6 +186,124 @@ enum DaemonManager {
         return labels
     }
 
+    // MARK: - 详细扫描（2.4.4）
+
+    /// 一个 LaunchDaemon 的运行时画像。
+    ///
+    /// 2.4.0 只扫 Label 集合，够不够用取决于人工清单覆盖了多少。
+    /// 2.4.4 起要展示本机「全部」标签，就必须连 plist 里的
+    /// Program / RunAtLoad / KeepAlive 一起读出来：
+    /// · Program 能看出这个服务到底属于哪个 App
+    /// · RunAtLoad / KeepAlive 决定它是不是「开机就常驻、挂了还拉起」
+    struct DaemonInfo: Identifiable {
+        let label: String
+        let plistPath: String
+        /// 可执行文件路径（取 Program，缺失时取 ProgramArguments[0]）
+        let program: String
+        /// 由 `application.<bundleID>.<数字>` 解析出的 App 包名
+        let bundleID: String?
+        let runAtLoad: Bool
+        let keepAlive: Bool
+
+        var id: String { label }
+
+        /// 第三方 App 注册的后台服务（系统 App 的 application.* 不算）
+        var isThirdPartyApp: Bool {
+            guard let bid = bundleID else { return false }
+            return !bid.hasPrefix("com.apple.")
+        }
+
+        /// 系统 App 注册的后台服务
+        var isAppleApp: Bool {
+            guard let bid = bundleID else { return false }
+            return bid.hasPrefix("com.apple.")
+        }
+
+        /// 常驻型（开机自启 + 掉了自动拉起）
+        var isResident: Bool { runAtLoad || keepAlive }
+    }
+
+    /// 扫全量 LaunchDaemons 并解析出画像。
+    ///
+    /// 与 scanInstalledLabels 的区别：那个只读 Label 求交集，快；
+    /// 这个要把每个 plist 完整解一遍，大约 480 个文件，几十毫秒量级，
+    /// 因此只允许在「全部标签」页进入时于后台线程调一次。
+    static func scanDetails() -> [DaemonInfo] {
+        guard let files = try? fm.contentsOfDirectory(atPath: launchDaemonsPath) else {
+            return []
+        }
+        var out: [DaemonInfo] = []
+        out.reserveCapacity(files.count)
+        for file in files where file.hasSuffix(".plist") {
+            let path = (launchDaemonsPath as NSString).appendingPathComponent(file)
+            let dict = NSDictionary(contentsOfFile: path)
+            let label = (dict?["Label"] as? String)
+                ?? (file as NSString).deletingPathExtension
+            var program = (dict?["Program"] as? String) ?? ""
+            if program.isEmpty,
+               let args = dict?["ProgramArguments"] as? [String],
+               let first = args.first {
+                program = first
+            }
+            // KeepAlive 既可能是 Bool 也可能是字典（按条件拉起），
+            // 这里只关心"有没有配置"，非空即视为常驻
+            let runAtLoad = (dict?["RunAtLoad"] as? Bool) ?? false
+            let keepAlive = (dict?["KeepAlive"] != nil)
+            out.append(DaemonInfo(label: label,
+                                  plistPath: path,
+                                  program: program,
+                                  bundleID: bundleID(from: label),
+                                  runAtLoad: runAtLoad,
+                                  keepAlive: keepAlive))
+        }
+        return out.sorted { $0.label < $1.label }
+    }
+
+    /// `application.com.tencent.xin.12345` → `com.tencent.xin`
+    ///
+    /// 规则：去掉 application. 前缀，再剥掉末尾的纯数字段。
+    /// 数字段是 iOS 给每个 App 的后台任务编号，不参与包名。
+    static func bundleID(from label: String) -> String? {
+        guard label.hasPrefix("application.") else { return nil }
+        var parts = label.dropFirst("application.".count).split(separator: ".").map(String.init)
+        guard parts.count >= 3 else { return nil }
+        if let last = parts.last, Int(last) != nil { parts.removeLast() }
+        guard parts.count >= 2 else { return nil }
+        return parts.joined(separator: ".")
+    }
+
+    /// 包名 → App 显示名。
+    ///
+    /// 只为了在「全部标签」里把 `com.tencent.xin` 显示成「微信」。
+    /// 拿不到就退回显示包名，绝不影响功能 —— 所以全程 try? 静默。
+    /// 只扫两层目录，不递归，避免在装了 200 个 App 的机器上卡住。
+    static func installedAppNames() -> [String: String] {
+        var map: [String: String] = [:]
+        let roots = [
+            "/var/containers/Bundle/Application",
+            "/private/var/containers/Bundle/Application"
+        ]
+        for root in roots where map.isEmpty {
+            guard let subdirs = try? fm.contentsOfDirectory(atPath: root) else { continue }
+            for sub in subdirs {
+                let subPath = (root as NSString).appendingPathComponent(sub)
+                guard let inner = try? fm.contentsOfDirectory(atPath: subPath) else { continue }
+                for item in inner where item.hasSuffix(".app") {
+                    let infoPath = (subPath as NSString)
+                        .appendingPathComponent(item)
+                        .appending("/Info.plist")
+                    guard let d = NSDictionary(contentsOfFile: infoPath),
+                          let bid = d["CFBundleIdentifier"] as? String else { continue }
+                    let name = (d["CFBundleDisplayName"] as? String)
+                        ?? (d["CFBundleName"] as? String)
+                        ?? (item as NSString).deletingPathExtension
+                    map[bid] = name
+                }
+            }
+        }
+        return map
+    }
+
     /// 当前处于禁用状态的标签集合（读 launchd 的 disabled 数据库）。
     ///
     /// 文件不存在是正常状态 —— 表示这台设备从没禁用过任何守护进程，

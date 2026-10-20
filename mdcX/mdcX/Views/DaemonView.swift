@@ -82,6 +82,11 @@ struct DaemonView: View {
         }
     }
 
+    /// 本机存在但精选清单里没有解释的条目数 —— 也就是「全部标签」页的增量。
+    private var unguidedCount: Int {
+        installed.filter { !DaemonRegistry.hasGuide($0) }.count
+    }
+
     // MARK: Body
 
     var body: some View {
@@ -313,8 +318,41 @@ struct DaemonView: View {
                     }
                     .disabled(anyBusy || allDisableableTargets.isEmpty)
                     .opacity((anyBusy || allDisableableTargets.isEmpty) ? 0.5 : 1)
+
+                    // 2.4.4：精选清单只有 50 多项，本机通常有 480+ 个 plist。
+                    // 剩下那批以前在界面上完全看不见，这里给一个正经入口。
+                    NavigationLink {
+                        AllDaemonsView(logStore: logStore)
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(Color.white.opacity(0.10))
+                                Image(systemName: "square.stack.3d.up.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            .frame(width: 32, height: 32)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("浏览本机全部 \(installed.count) 项")
+                                    .font(.system(size: 13.5, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.9))
+                                Text("含 \(unguidedCount) 项未收录的标签，可逐项开关")
+                                    .font(.system(size: 10.5))
+                                    .foregroundColor(.white.opacity(0.42))
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white.opacity(0.25))
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    .disabled(!isAvailable)
+                    .opacity(isAvailable ? 1 : 0.45)
+                    .listRowBackground(Color.clear)
                 } header: { sectionHeader("一键优化", icon: "wand.and.stars") } footer: {
-                    Text("推荐组合只包含关掉后日常无感知、且不会牵连常用功能的项目。想更激进可以到右上角菜单里选场景。")
+                    Text("推荐组合只包含关掉后日常无感知、且不会牵连常用功能的项目。想更激进可以到右上角菜单里选场景；想精确到某一个后台服务，进「浏览本机全部」逐项处理。")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                 }

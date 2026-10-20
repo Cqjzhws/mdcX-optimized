@@ -56,19 +56,25 @@ struct ToolsView: View {
         RootProc.allCandidates().map { RootProc.inspect($0) }
     }
 
+    /// 分辨率模块的可用性。detect() 会碰磁盘，只算一次。
+    private var resolutionDetail: (text: String, ok: Bool) {
+        let d = ResolutionSetter.detect()
+        return (d.available ? "偏好域可写（重启显示服务需要 root）" : d.reason, d.available)
+    }
+
     var body: some View {
         List {
             // MARK: 兼容性
+            // 2.4.4：去掉了「文件清零（MacDirtyCow）」那一行。
+            // 本机的零页漏洞在 iOS 16.2 早已修补，那一行永远是一个橙色的
+            // "不支持"，既不能点也没有信息量，纯粹碍眼，因此整行删除。
             Section {
-                compatRow(title: "文件清零（MacDirtyCow）",
-                          detail: report.zeroPageStatusText,
-                          ok: report.zeroPageSupported)
                 compatRow(title: "Root Helper（killall）",
                           detail: rootHelperDetail,
                           ok: RootProc.hasRootChannel)
                 compatRow(title: "分辨率修改",
-                          detail: ResolutionSetter.detect().available ? "偏好域可写（重启显示服务需要 root）" : ResolutionSetter.detect().reason,
-                          ok: ResolutionSetter.detect().available)
+                          detail: resolutionDetail.text,
+                          ok: resolutionDetail.ok)
             } header: { header("兼容性检测", icon: "checkmark.shield.fill") }
               .listRowBackground(Color.white.opacity(0.045))
 

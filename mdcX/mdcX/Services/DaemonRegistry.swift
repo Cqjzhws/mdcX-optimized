@@ -133,6 +133,8 @@ enum DaemonRegistry {
         TweakCategory(key: "软件更新",       icon: "arrow.down.circle.fill",   color: .cyan),
         TweakCategory(key: "遥测诊断",       icon: "waveform.path.ecg",        color: .orange),
         TweakCategory(key: "建议与学习",     icon: "brain.head.profile",       color: .purple),
+        TweakCategory(key: "连续性与接力",   icon: "airdrop",                  color: Color(red: 0.36, green: 0.78, blue: 1.00)),
+        TweakCategory(key: "iCloud 与同步",  icon: "icloud.fill",              color: Color(red: 0.40, green: 0.62, blue: 1.00)),
         TweakCategory(key: "媒体与配件",     icon: "airplayaudio",             color: .mint),
         TweakCategory(key: "语音助手",       icon: "mic.fill",                 color: .pink),
         TweakCategory(key: "商店与内容",     icon: "bag.fill",                 color: .yellow),
@@ -345,6 +347,52 @@ enum DaemonRegistry {
                     confidence: .likely,
                     scenes: ["smooth", "privacy"]),
 
+        // ── 2.4.4 扩充：日志与诊断类（长期存在，开销真实） ──
+
+        DaemonEntry(label: "com.apple.powerlogd",
+                    displayName: "电量日志采集",
+                    service: "遥测诊断",
+                    summary: "把每一个进程的电量消耗、唤醒次数记成数据库（设置里那堆“电池”统计的数据源）。写盘频繁。",
+                    impact: "电池用量页面不再更新新的统计，历史数据保留。对续航有正面作用，尤其老机型。",
+                    risk: .low,
+                    category: "遥测诊断",
+                    icon: "bolt.horizontal.circle.fill",
+                    confidence: .confirmed,
+                    scenes: ["recommended", "battery", "smooth", "privacy"]),
+
+        DaemonEntry(label: "com.apple.diagnosticd",
+                    displayName: "统一诊断收集",
+                    service: "遥测诊断",
+                    summary: "系统级诊断信息的汇总入口，为 Apple 支持与 sysdiagnose 准备数据。",
+                    impact: "不再收集系统诊断。你自己在“设置 → 隐私 → 分析与改进”里看日志会缺内容。",
+                    risk: .low,
+                    category: "遥测诊断",
+                    icon: "cross.case.fill",
+                    confidence: .confirmed,
+                    scenes: ["recommended", "smooth", "privacy"]),
+
+        DaemonEntry(label: "com.apple.ReportCrash.Root",
+                    displayName: "崩溃报告（root）",
+                    service: "遥测诊断",
+                    summary: "以 root 身份为系统进程的崩溃生成报告。App 崩溃由另一个实例处理。",
+                    impact: "系统进程崩溃不再生成日志。App 崩溃日志仍会产生。",
+                    risk: .low,
+                    category: "遥测诊断",
+                    icon: "exclamationmark.octagon.fill",
+                    confidence: .likely,
+                    scenes: ["privacy", "smooth"]),
+
+        DaemonEntry(label: "com.apple.osanalytics.osanalyticshelper",
+                    displayName: "分析辅助进程",
+                    service: "遥测诊断",
+                    summary: "周期性把本地分析数据整理成可上报的包。空转与写盘都比看起来多。",
+                    impact: "不再整理分析数据。日常使用无感知。",
+                    risk: .low,
+                    category: "遥测诊断",
+                    icon: "chart.line.uptrend.xyaxis",
+                    confidence: .likely,
+                    scenes: ["recommended", "battery", "smooth", "privacy"]),
+
         // ================= 建议与学习 =================
 
         DaemonEntry(label: "com.apple.coreduetd",
@@ -401,6 +449,52 @@ enum DaemonRegistry {
                     icon: "lightbulb.circle.fill",
                     confidence: .unverified,
                     scenes: ["recommended", "smooth"]),
+
+        // ── 2.4.4 扩充：后台分析类，都是持续吃 CPU 的常客 ──
+
+        DaemonEntry(label: "com.apple.mediaanalysisd",
+                    displayName: "媒体内容分析",
+                    service: "建议与学习",
+                    summary: "对相册里的图片与视频做场景、物体、人脸分析，供回忆、搜索与“看图说话”使用。充电时整库跑。",
+                    impact: "不再生成新的智能分类，照片搜索里的场景关键词失效。已分析的存量结果保留。",
+                    risk: .low,
+                    category: "建议与学习",
+                    icon: "photo.stack.fill",
+                    confidence: .likely,
+                    scenes: ["battery", "smooth"]),
+
+        DaemonEntry(label: "com.apple.duetexpertd",
+                    displayName: "Proactive 预测引擎",
+                    service: "建议与学习",
+                    summary: "把 CoreDuet 学到的行为模式转成“下一个要用的 App”“该充电了”这类预测。",
+                    impact: "锁定屏幕与 Spotlight 的预测类建议消失。系统本身一切正常。",
+                    risk: .medium,
+                    category: "建议与学习",
+                    icon: "sparkles.rectangle.stack.fill",
+                    confidence: .likely,
+                    scenes: ["smooth", "battery"]),
+
+        DaemonEntry(label: "com.apple.siriknowledged",
+                    displayName: "Siri 知识库",
+                    service: "语音助手",
+                    summary: "维护 Siri 的本地知识索引（联系人、地点、日程的关联），索引阶段开销明显。",
+                    impact: "Siri 对本地信息的理解变差，问“我明天有什么安排”这类会退化成搜索。",
+                    risk: .medium,
+                    category: "语音助手",
+                    icon: "books.vertical.fill",
+                    confidence: .likely,
+                    scenes: ["smooth"]),
+
+        DaemonEntry(label: "com.apple.siriinferenced",
+                    displayName: "Siri 本地推断",
+                    service: "语音助手",
+                    summary: "iOS 16 起引入的端侧推断服务，为 Siri 与智能建议跑本地模型。",
+                    impact: "Siri 的端侧个性化建议减少。基础问答与指令不受影响。",
+                    risk: .medium,
+                    category: "语音助手",
+                    icon: "brain.fill",
+                    confidence: .unverified,
+                    scenes: ["smooth", "battery"]),
 
         // ================= 媒体与配件 =================
 
@@ -507,6 +601,137 @@ enum DaemonRegistry {
                     confidence: .unverified,
                     scenes: ["privacy"]),
 
+        // ================= 连续性与接力（2.4.4 新增分组） =================
+        // 这一组是「不跨设备就没用」的服务：单机用户全关掉收益明显，
+        // 有 Mac / iPad / AirPods 的人关掉会立刻察觉。
+
+        DaemonEntry(label: "com.apple.sharingd",
+                    displayName: "AirDrop / 接力",
+                    service: "连续性与接力",
+                    summary: "AirDrop 的收发端、通用剪贴板、接力（Handoff）与“从 iPhone 接听”都归它管。",
+                    impact: "AirDrop 收不到也发不出，剪贴板不再跨设备，接力失效。单机使用完全无感。",
+                    risk: .medium,
+                    category: "连续性与接力",
+                    icon: "airdrop",
+                    confidence: .confirmed,
+                    scenes: ["battery", "privacy"]),
+
+        DaemonEntry(label: "com.apple.rapportd",
+                    displayName: "设备互联通道",
+                    service: "连续性与接力",
+                    summary: "iPhone 与 Mac / iPad / Watch 之间的近距离通信底座（接力、通用控制、跨设备投送都走它）。",
+                    impact: "跨设备功能大面积失效，包括接力、跨设备复制粘贴与靠近自动切换。单机使用无感。",
+                    risk: .medium,
+                    category: "连续性与接力",
+                    icon: "dot.radiowaves.left.and.right",
+                    confidence: .likely,
+                    scenes: ["battery", "privacy"]),
+
+        // ================= iCloud 与同步（2.4.4 新增分组） =================
+        // 关掉这些不会破坏登录态，但会停掉对应的一条同步链路。
+        // 每一项的 impact 都写清了「哪条链路停」，避免用户以为 iCloud 整体挂了。
+
+        DaemonEntry(label: "com.apple.bird",
+                    displayName: "iCloud 云盘同步",
+                    service: "iCloud 与同步",
+                    summary: "iCloud 云盘与“桌面/文稿”的文件同步守护，有文件变动时唤醒。",
+                    impact: "iCloud 云盘文件不再上传下载，其它设备看不到新改动。已有本地文件安全。",
+                    risk: .medium,
+                    category: "iCloud 与同步",
+                    icon: "icloud.and.arrow.up.fill",
+                    confidence: .confirmed,
+                    scenes: ["battery"]),
+
+        DaemonEntry(label: "com.apple.backupd",
+                    displayName: "iCloud 备份",
+                    service: "iCloud 与同步",
+                    summary: "充电联网时把整机备份打包上传到 iCloud。上传期间 CPU 与网络都不轻。",
+                    impact: "不再自动备份，换机或刷机时没有云端备份可恢复。建议先手动备份一次再关。",
+                    risk: .medium,
+                    category: "iCloud 与同步",
+                    icon: "arrow.clockwise.icloud.fill",
+                    confidence: .likely,
+                    scenes: ["battery"]),
+
+        DaemonEntry(label: "com.apple.networkserviceproxy",
+                    displayName: "iCloud 私密中继",
+                    service: "iCloud 与同步",
+                    summary: "为 iCloud 私密代理（Private Relay）与部分 Apple 服务做流量转发。",
+                    impact: "私密代理不可用，Safari 恢复直连。不影响普通上网。",
+                    risk: .low,
+                    category: "iCloud 与同步",
+                    icon: "arrow.triangle.branch",
+                    confidence: .likely,
+                    scenes: ["recommended", "privacy", "battery"]),
+
+        DaemonEntry(label: "com.apple.icloud.findmydeviced",
+                    displayName: "查找我的 iPhone",
+                    service: "iCloud 与同步",
+                    summary: "上报设备位置、接收“播放声音 / 丢失模式 / 抹掉”指令。",
+                    impact: "设备丢失后无法定位、无法远程锁定或抹掉，查找 App 里这台设备会显示离线。关之前请想清楚。",
+                    risk: .high,
+                    category: "iCloud 与同步",
+                    icon: "location.viewfinder",
+                    confidence: .confirmed,
+                    scenes: ["privacy"]),
+
+        DaemonEntry(label: "com.apple.identityservicesd",
+                    displayName: "iMessage / FaceTime 身份",
+                    service: "iCloud 与同步",
+                    summary: "管理 iMessage 与 FaceTime 的账号身份、设备注册与密钥协商。",
+                    impact: "iMessage 与 FaceTime 收发异常，可能需要重新登录 Apple ID 才能恢复。",
+                    risk: .high,
+                    category: "iCloud 与同步",
+                    icon: "message.fill",
+                    confidence: .confirmed,
+                    scenes: []),
+
+        DaemonEntry(label: "com.apple.searchpartyd",
+                    displayName: "查找网络（离线定位）",
+                    service: "位置与查找",
+                    summary: "让附近的其他 Apple 设备代为上报本机与配件的加密位置（“查找”网络）。",
+                    impact: "离线状态下设备与 AirTag 类配件无法被定位。在线时仍可被查找。",
+                    risk: .medium,
+                    category: "位置与查找",
+                    icon: "antenna.radiowaves.left.and.right.circle.fill",
+                    confidence: .likely,
+                    scenes: ["privacy", "battery"]),
+
+        // ================= 商店与内容（2.4.4 补充） =================
+
+        DaemonEntry(label: "com.apple.itunesstored",
+                    displayName: "App Store 下载服务",
+                    service: "商店与内容",
+                    summary: "处理 App 与内购内容的下载、续传与校验。",
+                    impact: "App Store 无法下载或更新 App，正在下载的任务会失败。已安装的 App 不受影响。",
+                    risk: .medium,
+                    category: "商店与内容",
+                    icon: "arrow.down.app.fill",
+                    confidence: .likely,
+                    scenes: []),
+
+        DaemonEntry(label: "com.apple.appstored",
+                    displayName: "App 自动更新",
+                    service: "商店与内容",
+                    summary: "负责 App 的后台自动更新与商店元数据刷新。",
+                    impact: "App 不再自动更新，需要手动去 App Store 点更新。",
+                    risk: .low,
+                    category: "商店与内容",
+                    icon: "arrow.triangle.2.circlepath.circle",
+                    confidence: .likely,
+                    scenes: ["recommended", "battery", "smooth"]),
+
+        DaemonEntry(label: "com.apple.adprivacyd",
+                    displayName: "广告隐私服务",
+                    service: "商店与内容",
+                    summary: "Apple 广告（App Store 与 Apple News 里的推广位）的定向与归因。",
+                    impact: "Apple 自家广告不再个性化。第三方 App 的广告不受影响。",
+                    risk: .low,
+                    category: "商店与内容",
+                    icon: "hand.raised.slash.fill",
+                    confidence: .likely,
+                    scenes: ["privacy", "recommended"]),
+
         // ================= 系统关键（硬白名单） =================
         // 以下条目永远不会出现在可操作列表里。
         // 它们只是"已知存在且绝不能碰"的登记，用于：
@@ -610,6 +835,39 @@ enum DaemonRegistry {
     /// 硬白名单：任何路径都不允许被禁用。
     static let protectedLabels: Set<String> = Set(all.filter { $0.risk == .critical }.map { $0.label })
 
+    /// 精选清单之外的「绝对不能碰」标签（2.4.4）。
+    ///
+    /// 2.4.4 新增了「全部标签」页，会把本机 480+ 项原样列出来 ——
+    /// 那一页里绝大多数条目没有人工写的解释，用户全凭标签名判断。
+    /// 一旦把 backboardd / configd / lockdownd 这类关掉，设备可能
+    /// 直接起不来，而且起不来就没法进 App 撤销 —— 只能刷机。
+    ///
+    /// 所以这里补一份「按 iOS 长期存在的核心守护进程」整理的禁改集合，
+    /// 宁可多挡几个，也不能让用户在不知情的情况下把系统关死。
+    /// 这份集合与上面 critical 条目的并集，就是 UI 上那把锁的全部依据。
+    static let coreSystemLabels: Set<String> = [
+        // 图形 / UI / 触控
+        "com.apple.backboardd", "com.apple.SpringBoard", "com.apple.frontboard.systemappservices",
+        "com.apple.runningboardd", "com.apple.userexperienced", "com.apple.assertiond",
+        // 通信底座
+        "com.apple.CommCenter", "com.apple.apsd", "com.apple.configd", "com.apple.mDNSResponder",
+        "com.apple.networkd", "com.apple.wifid", "com.apple.bluetoothd", "com.apple.lockdownd",
+        "com.apple.usbd", "com.apple.iap2d",
+        // 安全 / 权限 / 账号
+        "com.apple.securityd", "com.apple.tccd", "com.apple.mobile.keybagd",
+        "com.apple.opendirectoryd", "com.apple.containermanagerd", "com.apple.mobileactivationd",
+        "com.apple.MobileFileIntegrity", "com.apple.pkd",
+        // 电源 / 温控 / 看门狗
+        "com.apple.powerd", "com.apple.thermalmonitord", "com.apple.watchdogd", "com.apple.dasd",
+        // 存储 / 安装 / 系统服务
+        "com.apple.diskarbitrationd", "com.apple.installd", "com.apple.mobile.installation_proxy",
+        "com.apple.coreservicesd", "com.apple.notifyd", "com.apple.distnoted",
+        "com.apple.systemstats", "com.apple.logd", "com.apple.tailspind", "com.apple.cfprefsd.xpc.daemon",
+        "com.apple.aggregated", "com.apple.mobile.obliteration",
+        // 音频 / 显示 / 定位（关掉是立刻可见的功能缺失，且牵涉面太大）
+        "com.apple.mediaserverd", "com.apple.audio.coreaudiod", "com.apple.locationd"
+    ]
+
     /// 可对外展示并操作的条目（已剔除 critical）。
     static let actionable: [DaemonEntry] = all.filter { $0.risk.actionable }
 
@@ -634,6 +892,9 @@ enum DaemonRegistry {
     /// 不在白名单里的未知标签一律放行操作，但会被 UI 标为"未知服务"，
     /// 让用户自己承担风险 —— 与 Tweak 的 advanced 语义一致。
     static func isProtected(_ label: String) -> Bool {
-        protectedLabels.contains(label)
+        protectedLabels.contains(label) || coreSystemLabels.contains(label)
     }
+
+    /// 该标签是否有人工撰写的解释（用于区分「精选」与「未收录」）。
+    static func hasGuide(_ label: String) -> Bool { entry(byLabel: label) != nil }
 }
