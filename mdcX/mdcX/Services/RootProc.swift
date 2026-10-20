@@ -344,6 +344,31 @@ enum RootProc {
         execute(arguments: ["-9", "cfprefsd"])
     }
 
+    // MARK: - 设备重启（让守护进程改动生效）
+
+    /// 硬重启设备。守护进程改动只在系统启动时由 launchd 读取，
+    /// 普通的「注销」（杀 SpringBoard）只重启 UI、不重启 launchd，因此无效，必须真重启。
+    ///
+    /// 优先级：系统 reboot 二进制（/sbin、/usr/sbin、/bin）→ 兜底强杀 launchd（pid 1）。
+    /// 经 TrollStore persona-mgmt 启动的子进程以 uid 0 运行，reboot 系统调用才会成功；
+    /// 若连 reboot 二进制都找不到，则 fall back 到 `killall -9 launchd` ——
+    /// 强杀 pid 1 会触发内核强制重启（不优雅但一定成功，且 killall 是包内自带、必然存在）。
+    @discardableResult
+    static func rebootDevice() -> RootExecReport {
+        for dir in ["/sbin", "/usr/sbin", "/bin"] {
+            let bin = (dir as NSString).appendingPathComponent("reboot")
+            guard FileManager.default.isExecutableFile(atPath: bin) else { continue }
+            let code = runPrivileged(bin, arguments: [])
+            if code == 0 {
+                return RootExecReport(succeeded: true, usedPath: bin,
+                                      method: "reboot", detail: "已请求设备重启",
+                                      triedPaths: [bin])
+            }
+        }
+        // 兜底：强杀 launchd（pid 1），强制内核重启
+        return execute(arguments: ["-9", "launchd"])
+    }
+
     // MARK: - 通用 root 执行（2.4.0 · 守护进程管理与显示调节共用）
 
     // MARK: - 系统工具解析

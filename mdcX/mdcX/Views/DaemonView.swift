@@ -74,6 +74,13 @@ struct DaemonView: View {
             .filter { !disabledLabels.contains($0.label) }
     }
 
+    /// 一键全部禁用：本机存在、非系统关键、且当前处于启用状态的全部项。
+    private var allDisableableTargets: [DaemonEntry] {
+        DaemonRegistry.actionable.filter { entry in
+            installed.contains(entry.label) && !disabledLabels.contains(entry.label)
+        }
+    }
+
     // MARK: Body
 
     var body: some View {
@@ -179,6 +186,22 @@ struct DaemonView: View {
                     statusDot(ok: !installed.isEmpty,
                               text: installed.isEmpty ? "未读到守护进程" : "已识别 \(installed.count) 项")
                     Spacer()
+                    Button {
+                        requestReboot()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise.circle.fill")
+                                .font(.system(size: 11))
+                            Text("重启设备")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.white.opacity(0.10)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(anyBusy || !isAvailable)
                     StatPill(icon: "moon.zzz.fill", value: disabledLabels.count, tint: .orange)
                     StatPill(icon: "checkmark", value: sessionDisabled, tint: .green)
                     StatPill(icon: "arrow.uturn.backward", value: sessionEnabled, tint: .blue)
@@ -281,6 +304,14 @@ struct DaemonView: View {
                     }
                     .disabled(anyBusy || recommendedTargets.isEmpty)
                     .opacity((anyBusy || recommendedTargets.isEmpty) ? 0.5 : 1)
+
+                    GradientButton(title: "一键全部禁用（\(allDisableableTargets.count) 项）",
+                                   icon: "bolt.fill",
+                                   busy: isWorking) {
+                        confirmDisableAll()
+                    }
+                    .disabled(anyBusy || allDisableableTargets.isEmpty)
+                    .opacity((anyBusy || allDisableableTargets.isEmpty) ? 0.5 : 1)
                 } header: { sectionHeader("一键优化", icon: "wand.and.stars") } footer: {
                     Text("推荐组合只包含关掉后日常无感知、且不会牵连常用功能的项目。想更激进可以到右上角菜单里选场景。")
                         .font(.system(size: 11))
@@ -536,7 +567,7 @@ struct DaemonView: View {
         alertItem = AlertItem(
             title: Text("应用「\(scene.displayName)」"),
             message: Text("本次将禁用 \(targets.count) 项：\(names)\(more)。\n\n\(scene.note)\n\n操作前会自动保存快照，之后可一键还原。"),
-            primaryButton: .destructive(Text("禁用 \(targets.count) 项")) { performBatch(targets, scene: scene) },
+            primaryButton: .destructive(Text("禁用 \(targets.count) 项")) { performBatch(targets, name: scene.displayName) },
             secondaryButton: .cancel())
     }
 
@@ -546,14 +577,14 @@ struct DaemonView: View {
             .filter { !disabledLabels.contains($0.label) }
     }
 
-    private func performBatch(_ entries: [DaemonEntry], scene: DaemonScene) {
+    private func performBatch(_ entries: [DaemonEntry], name: String) {
         let labels = entries.map { $0.label }
         isBusy = true
         isWorking = true
-        batchTitle = scene.displayName
-        logStore.append("开始执行「\(scene.displayName)」（\(labels.count) 项）", level: .info)
+        batchTitle = name
+        logStore.append("开始执行「\(name)」（\(labels.count) 项）", level: .info)
 
-        DaemonBackup.capture(labels: labels, willDisable: true, sceneName: scene.displayName)
+        DaemonBackup.capture(labels: labels, willDisable: true, sceneName: name)
 
         DaemonManager.applyBatch(labels, disabled: true,
                                  progress: { idx, total, _ in
@@ -568,18 +599,55 @@ struct DaemonView: View {
             batchTitle = ""
             workingText = ""
             if result.failed == 0 {
-                logStore.append("「\(scene.displayName)」完成：禁用 \(result.succeeded) 项，跳过 \(result.skipped) 项",
+                logStore.append("「\(name)」完成：禁用 \(result.succeeded) 项，跳过 \(result.skipped) 项",
                                 level: .success)
             } else {
-                logStore.append("「\(scene.displayName)」完成：禁用 \(result.succeeded) 项，失败 \(result.failed) 项",
+                logStore.append("「\(name)」完成：禁用 \(result.succeeded) 项，失败 \(result.failed) 项",
                                 level: .warn)
                 for item in result.failures.prefix(3) {
                     logStore.append("失败：\(item.label)（code \(item.code)）", level: .error)
                 }
             }
             logStore.append("重启设备后生效", level: .info)
+            if result.succeeded > 0 { self.requestReboot() }
             snapshots = DaemonBackup.list()
         })
+    }
+
+    // MARK: 一键全部禁用
+
+    private func confirmDisableAll() {
+        let targets = allDisableableTargets
+        guard !targets.isEmpty else {
+            logStore.append("本机没有可禁用的守护进程（都已禁用或不在可选范围）", level: .warn)
+            return
+        }
+        let names = targets.prefix(6).map { $0.displayName }.joined(separator: "、")
+        let more = targets.count > 6 ? " 等 \(targets.count) 项" : ""
+        alertItem = AlertItem(
+            title: Text("一键全部禁用"),
+            message: Text("将禁用本机存在、且非系统关键的 \(targets.count) 个守护进程：\(names)\(more)。\n\n包含部分中风险项，禁用后需重启设备才生效，可在「备份与恢复」中一键还原。"),
+            primaryButton: .destructive(Text("全部禁用（\(targets.count) 项）")) {
+                performBatch(targets, name: "一键全部禁用")
+            },
+            secondaryButton: .cancel())
+    }
+
+    // MARK: 重启设备
+
+    private func requestReboot() {
+        alertItem = AlertItem(
+            title: Text("重启设备？"),
+            message: Text("守护进程的改动需要重启后才会生效。重启会结束所有正在运行的应用，未保存的数据会丢失。"),
+            primaryButton: .destructive(Text("立即重启")) { doReboot() },
+            secondaryButton: .cancel(Text("稍后再说")))
+    }
+
+    private func doReboot() {
+        logStore.append("正在请求设备重启…", level: .info)
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = RootProc.rebootDevice()
+        }
     }
 
     // MARK: 恢复

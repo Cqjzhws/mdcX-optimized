@@ -238,31 +238,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "mdcX Max v${{ env.APP_VERSION }} (守护进程修复)"
+          name: "mdcX Max v${{ env.APP_VERSION }} (守护进程 + 硬重启 + 一键全禁)"
           files: |
             artifacts/ipa/*.ipa
             artifacts/dylib/*.dylib
             artifacts/bundle/*.zip
           body: |
-            ## mdcX Max v${{ env.APP_VERSION }} — 修复守护进程管理不可用
+            ## mdcX Max v${{ env.APP_VERSION }} — 守护进程管理增强
 
-            ### 修复
+            ### 新增（2.4.2）
+            - **硬重启按钮**：守护进程的改动只在设备开机时由 launchd 读取，
+              普通的「注销」（仅重启 SpringBoard）不会让它生效，必须真重启。
+              新增「重启设备」按钮（Hero 卡常驻 + 批量完成后弹确认），
+              经 TrollStore persona-mgmt 以 root 调用系统 reboot 二进制；
+              找不到 reboot 时兜底强杀 launchd（pid 1）强制重启。
+            - **一键全部禁用**：禁用本机存在、非系统关键、且当前启用的全部守护进程。
+              二次确认 + 自动存快照 + 完成后提示重启，与场景按钮共用回滚机制。
+            - 启动日志版本号改为读取真实 Bundle 版本（不再写死「2.3.7 已就绪」）。
+            - 场景按钮重复点击不再报「没有可操作的项」，改为提示「均已禁用，可在恢复中还原」。
+
+            ### 修复（2.4.1）
             - **守护进程功能在 iOS 16.2 上整体不可用**：2.4.0 把「设备上存在
               launchctl」作为硬性前置条件，而 iOS 16.2 实测在 /bin、/usr/bin、
               /sbin 下都没有可执行的 launchctl，功能被能力检测直接挡死。
               现改为直接读写 `/var/db/com.apple.xpc.launchd/disabled.plist`
-              （Geranium 等工具一直采用的方式），不再依赖 launchctl。
-              - 读出：先试 App 直读，失败再借 root 复制出来
-              - 写入：一律走 root，同目录临时文件 + rename 原子替换，并读回校验
-            - **批量操作 I/O 从 2N 次降到 2 次**：2.4.0 逐项「读 plist → 改一个键
-              → 写回」，25 项就是 25 读 + 25 写。现在整批一次读、一次写回。
-              回滚同样合并为一次读写。
-            - **工具箱 Root Helper 状态描述错误**：原文案是「找到 killall 但无
-              root 特权，无法结束系统进程」，在正常的 TrollStore 安装下恒显示这句。
-              实际上 root 来自主程序的 persona-mgmt（子进程以 uid 0 启动），
-              killall 自身不需要 setuid 或内嵌 entitlement。已改为显示真实来源。
-            - 「killall 内嵌特权 entitlement」诊断行同理，改为显示
-              「killall 特权来源：persona-mgmt / setuid-root / 缺失」。
+              （Geranium 等工具一直采用的方式），不再依赖 launchctl；批量 I/O 从
+              2N 次降到 2 次；工具箱 Root Helper 状态文案改为显示真实特权来源。
 
             ### 沿用 2.4.0 的能力
             - 守护进程清单：30 项可操作 + 13 项系统关键进程白名单 + 5 个场景组合
@@ -273,7 +274,7 @@ jobs:
 
             ### 已知限制
             - 守护进程与刷新率的改动**需要重启设备后生效**（launchd 只在启动时读
-              disabled.plist），界面已有提示
+              disabled.plist），界面与重启按钮已明示
             - 最低系统版本仍为 iOS 15.6（全项目依赖 iOS 15+ 的 SwiftUI API）
             - 文件清零仅 iOS 15.6–16.1.2 有效（MacDirtyCow 在 16.2 已被修复）
 
