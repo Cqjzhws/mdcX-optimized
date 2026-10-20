@@ -13,7 +13,7 @@ concurrency:
 env:
   # 版本号只在这里写一次，下面全都是引用。
   # 改名/发新版时漏掉某处的老问题就是这么解决的。
-  APP_VERSION: "2.4.1"
+  APP_VERSION: "2.4.2"
 
 jobs:
   build:

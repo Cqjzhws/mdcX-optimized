@@ -520,7 +520,15 @@ struct DaemonView: View {
     private func confirmScene(_ scene: DaemonScene) {
         let targets = targets(for: scene)
         guard !targets.isEmpty else {
-            logStore.append("「\(scene.displayName)」在本机上没有可操作的项", level: .warn)
+            // 区分两种情况：本机压根没有这些守护进程 / 本场景项已全部禁用
+            let allOnDevice = (scene.key == "recommended")
+                ? DaemonRegistry.recommended(available: installed)
+                : DaemonRegistry.entries(forScene: scene.key, available: installed)
+            if allOnDevice.isEmpty {
+                logStore.append("「\(scene.displayName)」在本机上未找到对应的守护进程", level: .warn)
+            } else {
+                logStore.append("「\(scene.displayName)」中的项均已禁用，可在下方「恢复」中还原", level: .info)
+            }
             return
         }
         let names = targets.prefix(6).map { $0.displayName }.joined(separator: "、")
