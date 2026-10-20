@@ -28,7 +28,15 @@ struct RootView: View {
             }
             .navigationViewStyle(.stack)
             .tabItem {
-                Label("分辨率", systemImage: "display")
+                Label("显示", systemImage: "display")
+            }
+
+            NavigationView {
+                DaemonView(isBusy: $sharedBusy, logStore: logStore)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("守护进程", systemImage: "rectangle.stack.badge.minus")
             }
 
             NavigationView {

@@ -97,8 +97,8 @@ struct SettingsView: View {
 
             // MARK: 关于
             Section {
-                InfoRow(icon: "app.fill", tint: settings.theme.primary, title: "版本", value: "2.3.7 (237)", monospaced: true)
-                InfoRow(icon: "hammer.fill", tint: .indigo, title: "构建通道", value: "macOS CI · Theos/Xcode")
+                InfoRow(icon: "app.fill", tint: settings.theme.primary, title: "版本", value: versionText, monospaced: true)
+                InfoRow(icon: "hammer.fill", tint: .indigo, title: "构建通道", value: "macOS CI · Xcode")
                 InfoRow(icon: "function", tint: .teal, title: "核心库", value: "mdcXCore.dylib arm64", monospaced: true)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("说明")
@@ -126,6 +126,14 @@ struct SettingsView: View {
         } message: {
             Text("将清空收藏列表与「上次已应用」标记，不影响已备份的系统文件。")
         }
+    }
+
+    /// 从包内读取，不再手写版本号（手写的那串早晚会和工程设置对不上）
+    private var versionText: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
     }
 
     private func header(_ title: String, icon: String) -> some View {

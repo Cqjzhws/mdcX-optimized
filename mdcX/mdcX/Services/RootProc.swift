@@ -114,13 +114,19 @@ enum RootProc {
     }
 
     /// 包内 helper 是否内嵌了特权 entitlements（ldid 注入，含 backboardd 控制键）
-    static var helperHasRootEntitlements: Bool {
+    ///
+    /// 2.4.0：改为进程内只算一次。原来这个值被放在 SwiftUI 的 body 里反复读取，
+    /// 每刷新一次界面就要把 91KB 的 helper 整个读进内存做子串匹配。
+    /// `static let` 的初始化自带 swift_once，线程安全且只跑一次。
+    private static let cachedHelperEntitlements: Bool = {
         guard let p = bundleHelperPath,
               let data = try? Data(contentsOf: URL(fileURLWithPath: p)) else { return false }
         let s = String(decoding: data, as: UTF8.self)
         return s.contains("task_for_pid-allow")
             && s.contains("platform-application")
-    }
+    }()
+
+    static var helperHasRootEntitlements: Bool { cachedHelperEntitlements }
 
     /// 传统 setuid-root 方式（老 TrollStore / 越狱环境）
     static var isRealSetuidRoot: Bool {
@@ -200,12 +206,17 @@ enum RootProc {
     // MARK: - 智能执行（对外主入口）
 
     /// 主 App 是否带 persona-mgmt entitlement（TrollStore root spawn 的钥匙）
-    static var hasPersonaEntitlement: Bool {
-        // 直接读自身内嵌 entitlement 标记
+    ///
+    /// 2.4.0：同样改为只算一次。这是全 App 最贵的一个探测 ——
+    /// 此前每次 UI 刷新都要把几 MB 的主可执行文件整个读进内存解码成字符串，
+    /// 且 Hero 卡与工具箱一屏之内会调用十几次。
+    private static let cachedPersonaEntitlement: Bool = {
         guard let exe = Bundle.main.executablePath,
               let data = try? Data(contentsOf: URL(fileURLWithPath: exe)) else { return false }
         return String(decoding: data, as: UTF8.self).contains("com.apple.private.persona-mgmt")
-    }
+    }()
+
+    static var hasPersonaEntitlement: Bool { cachedPersonaEntitlement }
 
     /// 按优先级尝试所有可用执行链，返回详细报告。
     static func execute(arguments: [String], allowShellFallback: Bool = true) -> RootExecReport {
@@ -331,5 +342,66 @@ enum RootProc {
 
     static func flushPreferenceCache() -> RootExecReport {
         execute(arguments: ["-9", "cfprefsd"])
+    }
+
+    // MARK: - 通用 root 执行（2.4.0 · 守护进程管理与显示调节共用）
+
+    /// 系统 launchctl 的候选位置。iOS 上通常只有 /bin/launchctl 存在。
+    static let launchctlCandidates: [String] = [
+        "/bin/launchctl",
+        "/usr/bin/launchctl",
+        "/sbin/launchctl"
+    ]
+
+    /// 设备上实际可用的 launchctl，进程内只探测一次。
+    /// 拿不到就说明这套执行链在本设备上不可用，守护进程功能应当直接停用。
+    static let resolvedLaunchctlPath: String? = {
+        let fm = FileManager.default
+        return launchctlCandidates.first(where: { fm.isExecutableFile(atPath: $0) })
+    }()
+
+    /// 以 root 执行任意绝对路径的二进制（供非 killall 场景使用，如 launchctl）。
+    ///
+    /// 与 `execute` 的区别：`execute` 是"围绕 killall 的多策略链路"，
+    /// 这里则是"给定程序、给定参数"的确定性调用，不做路径猜测，也不走 shell。
+    ///
+    /// - Returns: 0 成功；-200 spawn 失败；-201 被信号终止；其余为子进程退出码。
+    @discardableResult
+    static func runPrivileged(_ path: String, arguments: [String]) -> Int32 {
+        // 首选 TrollStore 官方通道：主 App 带 persona-mgmt 时子进程以 root 运行
+        if hasPersonaEntitlement {
+            let code = TSRootSpawn.spawnRoot(path, arguments: arguments)
+            if code == 0 { return 0 }
+            // -200 表示 spawn 本身没起来，可以继续降级；其它情况直接返回真实结果
+            if code != -200 { return code }
+        }
+        // 降级：直接 spawn，依赖目标二进制自带 setuid-root，或当前进程已是 root
+        var pid: pid_t = 0
+        var argv: [UnsafeMutablePointer<CChar>?] = ([path] + arguments).map { strdup($0) } + [nil]
+        defer { argv.forEach { if let p = $0 { free(p) } } }
+
+        let rc = posix_spawn(&pid, path, nil, nil, &argv, environ)
+        guard rc == 0 else {
+            NSLog("[RootProc] posix_spawn(%@ %@) rc=%d (%s)",
+                  path, arguments.joined(separator: " "), rc, String(cString: strerror(rc)))
+            return -200
+        }
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        if (status & 0x7f) != 0 { return -201 }
+        return (status >> 8) & 0xff
+    }
+
+    /// 守护进程开关（launchctl disable / enable）。
+    ///
+    /// 走 Apple 官方途径而不是手写 plist：launchctl 自己负责
+    /// /var/db/com.apple.xpc.launchd/disabled.plist 的写入、权限与 migrated 标记，
+    /// 比"复制 → 改 → 移回"那一套更不容易把状态文件写坏。
+    ///
+    /// - Returns: 0 成功；-404 本设备没有可用 launchctl；其余为 launchctl 退出码。
+    @discardableResult
+    static func setServiceEnabled(_ label: String, enabled: Bool) -> Int32 {
+        guard let launchctl = resolvedLaunchctlPath else { return -404 }
+        return runPrivileged(launchctl, arguments: [enabled ? "enable" : "disable", label])
     }
 }

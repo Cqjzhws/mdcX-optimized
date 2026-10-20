@@ -45,6 +45,15 @@ enum ResolutionSetter {
     private static let widthKey  = "canvas_width"
     private static let heightKey = "canvas_height"
 
+    /// 刷新率键。
+    ///
+    /// 这是公开资料里用于让系统在读取画布偏好时一并采纳更高刷新率的键名。
+    /// 需要如实说明：它不是 Apple 的公开接口，不同 iOS 版本对该键的读取情况
+    /// 并不一致，部分机型写入后不会有任何变化。
+    /// 因此本功能一律先写入、再由用户确认，不确认就自动还原 ——
+    /// 不生效最多是无变化，不会造成任何损坏。
+    private static let refreshRateKey = "refreshRate"
+
     // MARK: - 预设
     //
     // 与 Res Setter 内置预设一致：使用目标机型原生的显示画布尺寸，
@@ -68,6 +77,51 @@ enum ResolutionSetter {
         Preset(name: "iPhone 14/15 Pro Max / 16 Plus",width: 1290, height: 2796),
         Preset(name: "iPhone 16 Pro Max",             width: 1320, height: 2868),
     ]
+
+    // MARK: - 整机显示预设（2.4.0）
+
+    /// 整机预设 = 目标机型的画布尺寸 + 该机型本身的刷新率。
+    /// 老机型套用新机型的规格，等于同时拿到更大的显示空间和更高的刷新率档位。
+    struct DevicePreset: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let width: Int
+        let height: Int
+        let refreshRate: Int
+        /// 该机型是否本身带 ProMotion 面板（决定预设的刷新率档位）
+        let promotion: Bool
+    }
+
+    static let devicePresets: [DevicePreset] = [
+        DevicePreset(id: "8p",     name: "iPhone 8 Plus",             width: 1242, height: 2208, refreshRate: 60,  promotion: false),
+        DevicePreset(id: "xsmax",  name: "iPhone Xs Max / 11 Pro Max",width: 1242, height: 2688, refreshRate: 60,  promotion: false),
+        DevicePreset(id: "13mini", name: "iPhone 12/13 mini",         width: 1080, height: 2340, refreshRate: 60,  promotion: false),
+        DevicePreset(id: "13",     name: "iPhone 12/13/14 / 13 Pro",  width: 1170, height: 2532, refreshRate: 60,  promotion: false),
+        DevicePreset(id: "14plus", name: "iPhone 13 Pro Max / 14 Plus", width: 1284, height: 2778, refreshRate: 120, promotion: true),
+        DevicePreset(id: "14pro",  name: "iPhone 14 Pro / 15 / 16 Pro", width: 1179, height: 2556, refreshRate: 120, promotion: true),
+        DevicePreset(id: "15pm",   name: "iPhone 14/15 Pro Max / 16 Plus", width: 1290, height: 2796, refreshRate: 120, promotion: true),
+        DevicePreset(id: "16pm",   name: "iPhone 16 Pro Max",         width: 1320, height: 2868, refreshRate: 120, promotion: true)
+    ]
+
+    /// 可选的刷新率档位。只提供系统层面有意义的三档。
+    static let refreshRateOptions: [Int] = [60, 90, 120]
+
+    // MARK: - 刷新率读写
+
+    /// 当前写入的刷新率。没有记录则返回 nil（表示"跟随系统默认"）。
+    static func currentRefreshRate() -> Int? {
+        guard let plist = NSDictionary(contentsOfFile: preferencesPath),
+              let value = plist[refreshRateKey] as? NSNumber else { return nil }
+        let rate = value.intValue
+        return rate > 0 ? rate : nil
+    }
+
+    /// 刷新率取值校验：只放行一个较宽的合理区间，避免写入荒唐值。
+    static func validate(refreshRate: Int) -> String? {
+        guard refreshRate >= 30 else { return "刷新率过低（低于 30Hz）。" }
+        guard refreshRate <= 144 else { return "刷新率过高（高于 144Hz），系统不会采纳。" }
+        return nil
+    }
 
     // MARK: - 能力探测
 
@@ -166,10 +220,16 @@ enum ResolutionSetter {
         return nil
     }
 
-    /// 应用指定分辨率。
+    /// 应用指定分辨率，可同时指定刷新率。
+    ///
+    /// - Parameters:
+    ///   - refreshRate: 传入数值则一并写入刷新率；传 nil 表示不动刷新率字段（保留现状）。
     /// - Important: 调用方负责保证与零页操作互斥（两者都会重启 backboardd）。
-    static func apply(width: Int, height: Int) -> ApplyResult {
+    static func apply(width: Int, height: Int, refreshRate: Int? = nil) -> ApplyResult {
         if let reason = validate(width: width, height: height) {
+            return .outOfRange(reason)
+        }
+        if let rate = refreshRate, let reason = validate(refreshRate: rate) {
             return .outOfRange(reason)
         }
 
@@ -188,17 +248,25 @@ enum ResolutionSetter {
 
         plist[widthKey]  = NSNumber(value: width)
         plist[heightKey] = NSNumber(value: height)
+        if let rate = refreshRate {
+            plist[refreshRateKey] = NSNumber(value: rate)
+        }
 
         guard plist.write(toFile: preferencesPath, atomically: true) else {
             return .writeFailed("写入失败：App 仍处于沙盒中或无目录写权限，请确认使用的是本版本且经 TrollStore 安装。")
         }
 
-        // 强制把内核页缓存刷到磁盘，随后直接读文件校验（绕开 cfprefsd）
-        sync()
+        // 2.4.0：去掉了这里的 sync()。
+        // 前面已经是 atomically 写入，再同步刷一次整个文件系统缓存没有任何收益，
+        // 反而会在老设备上白等几百毫秒。回读校验直接读文件即可（绕开 cfprefsd）。
         guard let verify = NSDictionary(contentsOfFile: preferencesPath),
               (verify[widthKey] as? NSNumber)?.intValue == width,
               (verify[heightKey] as? NSNumber)?.intValue == height else {
             return .writeFailed("写入后读回校验失败，系统可能拦截了该偏好文件。")
+        }
+        if let rate = refreshRate,
+           (verify[refreshRateKey] as? NSNumber)?.intValue != rate {
+            return .writeFailed("刷新率写入后读回校验失败。")
         }
 
         // 关键：分步刷新——先 cfprefsd 再 backboardd，分辨率才会真正重载。

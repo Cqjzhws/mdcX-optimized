@@ -17,6 +17,13 @@ struct ToolsView: View {
     @State private var backupTick = 0   // 触发备份信息刷新
     @State private var soundBatchRunning = false
 
+    // 流畅度套件（2.4.0）：显示状态与守护进程状态都只在进入页面时读一次
+    @State private var displaySummary: String = "读取中…"
+    @State private var disabledDaemonCount: Int = 0
+    @State private var recommendedDaemonCount: Int = 0
+    @State private var daemonCapability: Bool = false
+    @State private var hasCanvas: Bool = false
+
     private var theme: AppTheme { settings.theme }
     private var report: DeviceReport { DeviceInfo.report() }
     private var anyBusy: Bool { isBusy || busyAction != nil || soundBatchRunning }
@@ -180,6 +187,67 @@ struct ToolsView: View {
             }
             .listRowBackground(Color.white.opacity(0.045))
 
+            // MARK: 流畅度套件（2.4.0）
+            Section {
+                InfoRow(icon: "display", tint: theme.primary,
+                        title: "当前显示",
+                        value: displaySummary, monospaced: true)
+                InfoRow(icon: "rectangle.stack.badge.minus", tint: .orange,
+                        title: "已禁用守护进程",
+                        value: "\(disabledDaemonCount) 项", monospaced: true)
+
+                Button {
+                    confirmBoostRefreshRate()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if busyAction == "refresh" { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "gauge.high").font(.system(size: 13, weight: .bold))
+                        Text("提升刷新率到 120Hz").bold()
+                        Spacer()
+                    }
+                }
+                .buttonStyle(CustomButtonStyle(color: .mint))
+                .disabled(anyBusy || !hasCanvas)
+                .opacity((anyBusy || !hasCanvas) ? 0.5 : 1)
+                .listRowBackground(Color.clear)
+
+                Button {
+                    confirmDisableRecommendedDaemons()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if busyAction == "daemons" { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "rectangle.stack.badge.minus").font(.system(size: 13, weight: .bold))
+                        Text("禁用推荐守护进程（\(recommendedDaemonCount) 项）").bold()
+                        Spacer()
+                    }
+                }
+                .buttonStyle(CustomButtonStyle(color: Color(red: 0.45, green: 0.85, blue: 0.98)))
+                .disabled(anyBusy || !daemonCapability || recommendedDaemonCount == 0)
+                .opacity((anyBusy || !daemonCapability || recommendedDaemonCount == 0) ? 0.5 : 1)
+                .listRowBackground(Color.clear)
+
+                Button {
+                    confirmRestoreEverything()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                        Text("全部还原（显示 + 守护进程）").bold()
+                        Spacer()
+                    }
+                }
+                .buttonStyle(CustomButtonStyle(color: .teal))
+                .disabled(anyBusy)
+                .listRowBackground(Color.clear)
+            } header: { header("流畅度套件", icon: "gauge.with.dots.needle.67percent") } footer: {
+                Text("显示改动与守护进程改动共用同一套回退机制：改前存快照，随时可以只还原你动过的那几项。守护进程的改动需要重启设备后生效。")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .listRowBackground(Color.white.opacity(0.045))
+
             // MARK: 批量静音
             Section {
                 Button {
@@ -254,6 +322,7 @@ struct ToolsView: View {
         .id(backupTick)
         .listStyle(.insetGrouped)
         .background(Color(red: 0.027, green: 0.027, blue: 0.045).ignoresSafeArea())
+        .onAppear { loadTuningState() }
         .navigationTitle("工具箱")
         .alert(item: $alertItem) { item in
             Alert(title: item.title, message: item.message,
@@ -388,6 +457,138 @@ struct ToolsView: View {
             logStore.append("静音完成：成功 \(ok)，跳过 \(skip)，失败 \(fail)。建议 Respring 生效。",
                             level: fail == 0 ? .success : .warn)
             backupTick += 1
+        }
+    }
+
+    // MARK: 流畅度套件（2.4.0）
+
+    /// 只在进入页面时读一次，绝不放在 body 里 —— 这里会读 plist 与扫描目录。
+    private func loadTuningState() {
+        let canvas = ResolutionSetter.currentCanvas()
+        let rate = ResolutionSetter.currentRefreshRate()
+        if let c = canvas {
+            hasCanvas = true
+            displaySummary = rate.map { "\(c.width)×\(c.height) · \($0)Hz" } ?? "\(c.width)×\(c.height)"
+        } else {
+            hasCanvas = false
+            displaySummary = "系统默认"
+        }
+
+        let disabled = DaemonManager.readDisabledLabels()
+        disabledDaemonCount = disabled.count
+        daemonCapability = DaemonManager.detect().available
+        guard daemonCapability else {
+            recommendedDaemonCount = 0
+            return
+        }
+        let installed = DaemonManager.scanInstalledLabels()
+        recommendedDaemonCount = DaemonRegistry.recommended(available: installed)
+            .filter { !disabled.contains($0.label) }
+            .count
+    }
+
+    private func confirmBoostRefreshRate() {
+        alertItem = AlertItem(
+            title: Text("提升到 120Hz"),
+            message: Text("保持当前画布不变，把刷新率设为 120Hz。\n\n屏幕会短暂黑屏后回到锁屏。硬件不支持时系统不会采纳，也不会造成损坏。"),
+            primaryButton: .destructive(Text("应用")) { performBoostRefreshRate() },
+            secondaryButton: .cancel())
+    }
+
+    private func performBoostRefreshRate() {
+        busyAction = "refresh"
+        isBusy = true
+        logStore.append("[显示] 正在把刷新率设为 120Hz …")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = DisplayTuner.boostRefreshRate(to: 120)
+            DispatchQueue.main.async {
+                self.isBusy = false
+                self.busyAction = nil
+                switch result {
+                case .ok:
+                    self.logStore.append("[显示] 刷新率已写入，正在重启显示服务", level: .success)
+                case .outOfRange(let reason):
+                    self.logStore.append("[显示] 已拒绝：\(reason)", level: .warn)
+                case .writeFailed(let reason), .plistUnreadable(let reason):
+                    self.logStore.append("[显示] 失败：\(reason)", level: .error)
+                case .restartFailed(let detail):
+                    self.logStore.append("[显示] 已写入，但重启显示服务失败：\(detail)", level: .warn)
+                case .missingHelper:
+                    self.logStore.append("[显示] 失败：缺少提权工具", level: .error)
+                }
+                self.loadTuningState()
+            }
+        }
+    }
+
+    private func confirmDisableRecommendedDaemons() {
+        alertItem = AlertItem(
+            title: Text("禁用推荐守护进程"),
+            message: Text("将禁用本机的 \(recommendedDaemonCount) 项后台常驻进程。\n\n操作前会自动保存快照，可一键还原。改动需要重启设备后生效。"),
+            primaryButton: .destructive(Text("禁用")) { performDisableRecommended() },
+            secondaryButton: .cancel())
+    }
+
+    private func performDisableRecommended() {
+        busyAction = "daemons"
+        isBusy = true
+        let disabled = DaemonManager.readDisabledLabels()
+        let targets = DaemonRegistry.recommended(available: DaemonManager.scanInstalledLabels())
+            .filter { !disabled.contains($0.label) }
+        let labels = targets.map { $0.label }
+        guard !labels.isEmpty else {
+            isBusy = false
+            busyAction = nil
+            logStore.append("没有可禁用的推荐项", level: .warn)
+            return
+        }
+        logStore.append("开始禁用推荐守护进程（\(labels.count) 项）", level: .info)
+        DaemonBackup.capture(labels: labels, willDisable: true, sceneName: "工具箱 · 推荐组合")
+
+        DaemonManager.applyBatch(labels, disabled: true, progress: { _, _, _ in }) { result in
+            self.isBusy = false
+            self.busyAction = nil
+            if result.failed == 0 {
+                self.logStore.append("完成：禁用 \(result.succeeded) 项，跳过 \(result.skipped) 项。重启设备后生效。",
+                                     level: .success)
+            } else {
+                self.logStore.append("完成：禁用 \(result.succeeded) 项，失败 \(result.failed) 项", level: .warn)
+            }
+            self.loadTuningState()
+        }
+    }
+
+    private func confirmRestoreEverything() {
+        alertItem = AlertItem(
+            title: Text("全部还原"),
+            message: Text("把显示配置还原到改动前的状态，并把所有快照记录过的守护进程恢复成各自改动前的状态。\n\n不会连带影响你自己用别的方式改过的设置。"),
+            primaryButton: .destructive(Text("全部还原")) { performRestoreEverything() },
+            secondaryButton: .cancel())
+    }
+
+    private func performRestoreEverything() {
+        busyAction = "restoreall"
+        isBusy = true
+        logStore.append("正在还原显示配置与守护进程状态…")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let displayResult = DisplayTuner.undo()
+            let daemonOutcome = DaemonBackup.restoreAll()
+            DispatchQueue.main.async {
+                self.isBusy = false
+                self.busyAction = nil
+                switch displayResult {
+                case .ok:
+                    self.logStore.append("[显示] 已还原为改动前的配置", level: .success)
+                case .writeFailed(let reason):
+                    self.logStore.append("[显示] 没有可用的原始备份：\(reason)", level: .warn)
+                default:
+                    break
+                }
+                self.logStore.append("[守护进程] 还原 \(daemonOutcome.restored) 项，失败 \(daemonOutcome.failed) 项",
+                                     level: daemonOutcome.failed == 0 ? .success : .warn)
+                self.loadTuningState()
+                self.backupTick += 1
+            }
         }
     }
 

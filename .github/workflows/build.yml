@@ -3,11 +3,17 @@
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
   group: mdcx-build-main
   cancel-in-progress: true
+
+env:
+  # 版本号只在这里写一次，下面全都是引用。
+  # 改名/发新版时漏掉某处的老问题就是这么解决的。
+  APP_VERSION: "2.4.0"
 
 jobs:
   build:
@@ -25,13 +31,8 @@ jobs:
       - name: Ensure helper executable bit
         run: chmod +x mdcX/tools/killall || true
 
-      - name: Install ldid
-        run: |
-          if ! command -v ldid >/dev/null 2>&1; then
-            brew install ldid || true
-          fi
-          ldid 2>/dev/null | head -1 || echo "ldid check"
-          command -v ldid || true
+      # 本流程不签任何 ldid 二进制：主程序用 codesign，包内 killall 刻意保持原签名。
+      # 所以安装 ldid 这一步纯属白等一次 brew install，删掉。
 
       # ---------------------------------------------------------------
       # 1) 构建 App（未签名）
@@ -107,13 +108,13 @@ jobs:
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
           cd build/ipa
-          IPA_NAME="mdcX_Max_v2.3.7.ipa"
+          IPA_NAME="mdcX_Max_v${APP_VERSION}.ipa"
           zip -qr "$IPA_NAME" Payload -x "*.DS_Store"
           ls -la "$IPA_NAME"
           echo "IPA_PATH=$(pwd)/$IPA_NAME" >> $GITHUB_OUTPUT
           cd ../..
 
-          echo "Generated unsigned IPA at $IPA_PATH"
+          echo "Generated unsigned IPA at ${{ steps.build.outputs.IPA_PATH }}"
 
       # ---------------------------------------------------------------
       # 2) 编译独立 dylib 核心库（arm64 iOS，ad-hoc 签名）
@@ -150,24 +151,28 @@ jobs:
         id: bundle
         run: |
           set -e
-          mkdir -p build/bundle/mdcX-Max-2.3.7
-          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-2.3.7/
-          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-2.3.7/
-          cat > build/bundle/mdcX-Max-2.3.7/INSTALL.txt <<'EOF'
-          mdcX Max v2.3.7
+          mkdir -p build/bundle/mdcX-Max-${APP_VERSION}
+          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-${APP_VERSION}/
+          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-${APP_VERSION}/
+          cat > build/bundle/mdcX-Max-${APP_VERSION}/INSTALL.txt <<EOF
+          mdcX Max v${APP_VERSION}
           ====================================
-          1. mdcX_Max_v2.3.7.ipa — 必须使用 TrollStore 安装。
+          1. mdcX_Max_v${APP_VERSION}.ipa — 必须使用 TrollStore 安装。
              本版本已注入 no-sandbox / platform-application 特权，
              分辨率修改与注销（killall root helper）才可正常工作。
              AltStore / Sideloadly 等普通侧载无法授予 root。
-             文件清零功能仅 iOS 14.0-16.1.2 有效；
-             分辨率/注销支持所有 TrollStore 可安装版本（含 iOS 16.2）。
+
+             文件清零：仅 iOS 14.0-16.1.2 有效
+             分辨率 / 刷新率 / 注销：所有 TrollStore 可安装版本
+             守护进程管理：同上，另需设备存在 launchctl（iOS 自带）
+             —— 守护进程与刷新率的改动需要重启设备后生效
+
           2. mdcXCore.dylib — arm64 核心利用库（导出 mdcx_zero_file /
              mdcx_overwrite_file / mdcx_core_version）。
           EOF
           cd build/bundle
-          zip -qr mdcX-Max-2.3.7-bundle.zip mdcX-Max-2.3.7
-          echo "BUNDLE_PATH=$(pwd)/mdcx-Max-2.3.7-bundle.zip" >> $GITHUB_OUTPUT
+          zip -qr mdcX-Max-${APP_VERSION}-bundle.zip mdcX-Max-${APP_VERSION}
+          echo "BUNDLE_PATH=$(pwd)/mdcX-Max-${APP_VERSION}-bundle.zip" >> $GITHUB_OUTPUT
 
       # ---------------------------------------------------------------
       # 4) 上传 Artifacts
@@ -175,20 +180,100 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.7-IPA
+          name: mdcX-Max-${{ env.APP_VERSION }}-IPA
           path: ${{ steps.build.outputs.IPA_PATH }}
           retention-days: 60
 
       - name: Upload dylib artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcXCore-2.3.7-dylib
+          name: mdcXCore-${{ env.APP_VERSION }}-dylib
           path: ${{ steps.dylib.outputs.DYLIB_PATH }}
           retention-days: 60
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mdcX-Max-2.3.7-bundle
+          name: mdcX-Max-${{ env.APP_VERSION }}-bundle
           path: ${{ steps.bundle.outputs.BUNDLE_PATH }}
           retention-days: 60
+
+  # ---------------------------------------------------------------
+  # 5) 打 tag 时自动发布 Release
+  #
+  # 原先发布是另一个 workflow_dispatch，要人工把 build 的 run_id 填进去 ——
+  # 2.3.1 到 2.3.7 连发七次就是这么来的。现在与构建同属一条流水线，
+  # 可以直接取到自己的产物，推 tag 即出 Release。
+  # ---------------------------------------------------------------
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcX-Max-${{ env.APP_VERSION }}-IPA
+          path: artifacts/ipa
+
+      - name: Download dylib artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcXCore-${{ env.APP_VERSION }}-dylib
+          path: artifacts/dylib
+
+      - name: Download bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcX-Max-${{ env.APP_VERSION }}-bundle
+          path: artifacts/bundle
+
+      - name: Inspect
+        run: find artifacts -type f -print0 | xargs -0 ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "mdcX Max v${{ env.APP_VERSION }} (流畅度套件)"
+          files: |
+            artifacts/ipa/*.ipa
+            artifacts/dylib/*.dylib
+            artifacts/bundle/*.zip
+          body: |
+            ## mdcX Max v${{ env.APP_VERSION }} — 流畅度套件
+
+            ### 新增：守护进程管理
+            - 一键禁用用不上的后台常驻进程，按场景给出推荐组合
+              （推荐 / 续航 / 流畅 / 隐私 / 不用 HomeKit）
+            - 每一项都写明作用与「关掉会怎样」，风险等级一目了然
+            - 系统关键进程（推送、基带、看门狗等 13 项）在注册表层面剔除，
+              根本不会出现在可操作列表里
+            - 改动前自动存快照，支持精确到项的一键回滚与全部撤销
+            - 清单只作候选，运行时与设备实际 LaunchDaemons 求交集，
+              本机没有的项直接置灰
+
+            ### 新增：显示增强
+            - 刷新率调节（60 / 90 / 120Hz），与分辨率共用一套写入与重启链路
+            - 8 个整机预设，一次套用目标机型的画布 + 刷新率
+            - 应用后会记住改动，下次启动询问是否正常，可一键撤销
+
+            ### 顺带修掉的旧问题
+            - 最低系统版本 15.6 → 14.0，iOS 14.x / 15.0–15.5 终于装得上了
+            - 界面刷新时反复读取自身二进制做字符串匹配（改为进程内只算一次）
+            - 单项应用时在主线程复制系统文件导致的卡顿（移到后台）
+            - 批量执行时每个任务阻塞一个线程的隐患（改为单队列顺序执行）
+            - 分辨率写入后多余的 sync() 调用
+            - CI 里版本号硬编码 8 处（改为单一变量）
+            - 去掉了没被用到的 ldid 安装步骤
+
+            ### 安装要求
+            - 必须使用 **TrollStore** 安装；AltStore / Sideloadly / 证书侧载无法授权 root
+            - 文件清零：iOS 14.0–16.1.2
+            - 分辨率 / 刷新率 / 注销：所有 TrollStore 可安装版本
+            - 守护进程管理：同上，额外要求设备上存在 launchctl（iOS 自带）
+            - 守护进程的改动需要重启设备后生效
+            - 刷新率在部分机型 / 版本上可能不被系统采纳，届时无变化、也不会损坏
