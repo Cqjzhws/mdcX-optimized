@@ -337,7 +337,7 @@ struct DaemonView: View {
                                 Text("浏览本机全部 \(installed.count) 项")
                                     .font(.system(size: 13.5, weight: .semibold))
                                     .foregroundColor(.white.opacity(0.9))
-                                Text("含 \(unguidedCount) 项未收录的标签，可逐项开关")
+                                Text("已注释 \(installed.count - unguidedCount) 项，其余 \(unguidedCount) 项给推测注释，可逐项开关")
                                     .font(.system(size: 10.5))
                                     .foregroundColor(.white.opacity(0.42))
                             }

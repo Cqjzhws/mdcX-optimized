@@ -132,6 +132,9 @@ enum DaemonRegistry {
         TweakCategory(key: "HomeKit",       icon: "house.fill",              color: Color(red: 0.45, green: 0.85, blue: 0.98)),
         TweakCategory(key: "软件更新",       icon: "arrow.down.circle.fill",   color: .cyan),
         TweakCategory(key: "遥测诊断",       icon: "waveform.path.ecg",        color: .orange),
+        TweakCategory(key: "崩溃与日志",     icon: "ant.fill",                 color: Color(red: 0.95, green: 0.55, blue: 0.35)),
+        TweakCategory(key: "账号与凭据",     icon: "key.fill",                 color: .red),
+        TweakCategory(key: "网络与共享",     icon: "personalhotspot",          color: .blue),
         TweakCategory(key: "建议与学习",     icon: "brain.head.profile",       color: .purple),
         TweakCategory(key: "连续性与接力",   icon: "airdrop",                  color: Color(red: 0.36, green: 0.78, blue: 1.00)),
         TweakCategory(key: "iCloud 与同步",  icon: "icloud.fill",              color: Color(red: 0.40, green: 0.62, blue: 1.00)),
@@ -167,8 +170,13 @@ enum DaemonRegistry {
     ]
 
     // MARK: 全部候选条目
+    //
+    // 2.4.6 起拆成两批：coreEntries 是 2.4.0 起手写的那批，
+    // DaemonCommunity.entries 是按社区真机验证结论补的注释批
+    //（威锋真机帖 / MacRumors 清单 / Nugget 分类，见 Community 文件头）。
+    // 两批并集才是对外完整的注册表。
 
-    static let all: [DaemonEntry] = [
+    static let coreEntries: [DaemonEntry] = [
 
         // ================= HomeKit =================
         // 这一组是用户最容易误关的：关掉 homed 之后 Home App 直接变成空壳，
@@ -830,6 +838,10 @@ enum DaemonRegistry {
                     risk: .critical, category: "核心", icon: "eraser.fill", confidence: .confirmed)
     ]
 
+    /// 对外完整注册表 = 手写核心批 + 社区注释批。
+    /// 用计算属性而不是 let，避免初始化顺序问题。
+    static var all: [DaemonEntry] { coreEntries + DaemonCommunity.entries }
+
     // MARK: 查询
 
     /// 硬白名单：任何路径都不允许被禁用。
@@ -897,4 +909,155 @@ enum DaemonRegistry {
 
     /// 该标签是否有人工撰写的解释（用于区分「精选」与「未收录」）。
     static func hasGuide(_ label: String) -> Bool { entry(byLabel: label) != nil }
+
+    // MARK: 按名称推测（2.4.6）
+
+    /// 人工清单没收录的标签，按命名规律给一条「推测注释」。
+    /// 规则来自 Apple 命名习惯（XxxReporter / XxxAnalyzer / XxxCopier …），
+    /// 只做参考，绝不能替代人工验证 —— 调用方必须如实告诉用户这是推测。
+    struct DaemonGuess {
+        let service: String
+        let summary: String
+        let impact: String
+        let risk: DaemonRisk
+
+        init(service: String, risk: DaemonRisk, summary: String, impact: String) {
+            self.service = service
+            self.risk = risk
+            self.summary = summary
+            self.impact = impact
+        }
+    }
+
+    static func guessGuide(_ label: String) -> DaemonGuess? {
+        let l = label.lowercased()
+
+        // 顺序敏感：先匹配更具体的家族，再落到宽泛的关键词。
+        let rules: [(kw: [String], guess: DaemonGuess)] = [
+
+            // 崩溃 / 报告家族 —— 基本都只是"收集报告"，低风险
+            (.init(["crash", "panic", "hangreport", "reportmemory", "watchdoghandler"]),
+             DaemonGuess(service: "崩溃报告 (推测)", risk: .low,
+                         summary: "从命名看是崩溃 / 异常 / 卡顿的报告收集进程，与 ReportCrash 家族同源。",
+                         impact: "大概率只是不再收集报告，设备功能无损。")),
+
+            // 诊断 / 抓包 / 转储家族
+            (.init(["diagnos", "sysdiagnose", "spindump", "stackshot", "tcpdump",
+                    "dump", "symptom", "clarity"]),
+             DaemonGuess(service: "诊断调试 (推测)", risk: .low,
+                         summary: "从命名看是诊断 / 抓包 / 状态转储类进程，供 Apple 与开发者分析问题。",
+                         impact: "大概率只是诊断手段失效，日常使用无感。")),
+
+            // 遥测 / 统计 / 实验家族
+            (.init(["analytics", "telemetry", "metrics", "rtcreporting", "geo",
+                    "trial", "usage", "aggregate"]),
+             DaemonGuess(service: "遥测统计 (推测)", risk: .low,
+                         summary: "从命名看是使用统计 / 遥测上报 / 实验分组类进程。",
+                         impact: "大概率只是统计上报停止，无功能损失。")),
+
+            // 日志家族
+            (.init(["log"]),
+             DaemonGuess(service: "日志 (推测)", risk: .low,
+                         summary: "从命名看是某模块的日志记录 / 归档进程。",
+                         impact: "大概率只是日志停写。排查问题会少线索，功能无损。")),
+
+            // 更新 / 资产家族
+            (.init(["softwareupdate", "ota", "asset", "fota"]),
+             DaemonGuess(service: "更新与资产 (推测)", risk: .medium,
+                         summary: "从命名看与系统更新或资源包下载有关。",
+                         impact: "关掉后相关更新 / 资源下载可能停止。需要时再打开即可。")),
+
+            // 账号 / 认证家族 —— 明确劝退
+            (.init(["account", "credential", "auth", "token", "akd", "ids",
+                    "identity", "keychain"]),
+             DaemonGuess(service: "账号认证 (推测)", risk: .high,
+                         summary: "从命名看与账号 / 凭据 / 认证有关，这类进程是登录态的底座。",
+                         impact: "关掉可能影响 iCloud / App Store / iMessage 登录态，不建议动。")),
+
+            // 网络底座 —— 明确劝退
+            (.init(["wifi", "bluetooth", "network", "dns", "mdns", "eapol",
+                    "interface", "link"]),
+             DaemonGuess(service: "网络底座 (推测)", risk: .high,
+                         summary: "从命名看是网络 / 无线底座的组成部分。",
+                         impact: "关掉可能导致断网或系统功能异常，不建议动。")),
+
+            // 电源 / 温控 —— 明确劝退
+            (.init(["thermal", "powerd", "battery", "charging", "batterymonitor"]),
+             DaemonGuess(service: "电源温控 (推测)", risk: .high,
+                         summary: "从命名看与电源 / 温控 / 充电管理有关。",
+                         impact: "关掉可能导致过热失控或异常关机，不建议动。")),
+
+            // Siri / 语音家族
+            (.init(["siri", "assistant", "voice", "speech"]),
+             DaemonGuess(service: "语音助手 (推测)", risk: .medium,
+                         summary: "从命名看是 Siri / 语音识别链条的组成部分。",
+                         impact: "相关语音功能可能失效或变笨。不用语音的人影响有限。")),
+
+            // 通知 / 提醒
+            (.init(["notification", "usernote", "reminder"]),
+             DaemonGuess(service: "通知 (推测)", risk: .medium,
+                         summary: "从命名看与通知或提醒的存取有关。",
+                         impact: "通知可能异常。推送底座是 apsd（已锁定），这里是数据层。")),
+
+            // 照片 / 媒体分析
+            (.init(["photo", "mediaanalysis", "image", "video"]),
+             DaemonGuess(service: "照片媒体 (推测)", risk: .low,
+                         summary: "从命名看是照片 / 媒体的分析或整理进程。",
+                         impact: "智能相册、回忆等功能可能变弱。无感居多。")),
+
+            // 位置 / 查找
+            (.init(["location", "geo", "findmy", "fmd", "compass"]),
+             DaemonGuess(service: "位置查找 (推测)", risk: .medium,
+                         summary: "从命名看与定位或查找网络有关。",
+                         impact: "定位相关功能可能失效，查找网络可能断。")),
+
+            // iCloud / 同步
+            (.init(["icloud", "cloud", "sync", "bird", "backup"]),
+             DaemonGuess(service: "云同步 (推测)", risk: .medium,
+                         summary: "从命名看是 iCloud 同步或备份链条的一环。",
+                         impact: "对应云服务可能停止同步。不用该云功能的人无感。")),
+
+            // 打印 / 外设 / 配件
+            (.init(["print", "accessory", "iap", "otp", "usb", "hid"]),
+             DaemonGuess(service: "外设配件 (推测)", risk: .medium,
+                         summary: "从命名看与配件 / 外设通信有关。",
+                         impact: "相关配件可能异常。不用对应配件的人无感。")),
+
+            // 游戏
+            (.init(["game"]),
+             DaemonGuess(service: "游戏中心 (推测)", risk: .low,
+                         summary: "从命名看是 Game Center 相关进程。",
+                         impact: "Game Center 排行榜 / 好友可能失效。不玩联机的人无感。")),
+
+            // 搜索 / 建议 / 知识
+            (.init(["search", "suggest", "knowledge", "duet", "tips", "proactive"]),
+             DaemonGuess(service: "建议学习 (推测)", risk: .low,
+                         summary: "从命名看是系统建议 / 搜索索引 / 预测引擎类进程。",
+                         impact: "智能建议可能变弱。无感居多。")),
+
+            // 共享 / 接力
+            (.init(["sharing", "handoff", "continuity", "relay", "rapport"]),
+             DaemonGuess(service: "连续互通 (推测)", risk: .medium,
+                         summary: "从命名看是跨设备共享 / 接力类进程。",
+                         impact: "AirDrop、接力等跨设备功能可能失效。单机使用无感。")),
+
+            // 安全 / 完整性 —— 明确劝退
+            (.init(["integrity", "securityd", "sandbox", "trust", "sandboxd",
+                    "amfi", "fairplay"]),
+             DaemonGuess(service: "安全机制 (推测)", risk: .high,
+                         summary: "从命名看是系统安全 / 完整性校验的组成部分。",
+                         impact: "关掉可能影响系统安全甚至无法开机，不建议动。")),
+
+            // 设置 / 初始化
+            (.init(["setup", "provision", "activation", "pair"]),
+             DaemonGuess(service: "初始化 (推测)", risk: .medium,
+                         summary: "从命名看与设备初始化 / 激活 / 配对有关。",
+                         impact: "正常使用中用不到；重置设备或恢复时可能出问题。")),
+        ]
+
+        for rule in rules where rule.kw.contains(where: { l.contains($0) }) {
+            return rule.guess
+        }
+        return nil
+    }
 }

@@ -71,6 +71,10 @@ struct AllDaemonsView: View {
     private var unguidedCount: Int {
         infos.filter { !DaemonRegistry.hasGuide($0.label) }.count
     }
+    /// 有人工注释（手写批 + 社区批）的条目数
+    private var guidedCount: Int {
+        infos.count - unguidedCount
+    }
 
     // MARK: 过滤
 
@@ -177,7 +181,7 @@ struct AllDaemonsView: View {
                         .foregroundColor(.white.opacity(0.55))
                     Spacer()
                 }
-                Text("其中 \(unguidedCount) 项没有人工解释（以前在界面上看不见）。系统核心进程已上锁，其余可单独开关。")
+                Text("已人工注释 \(guidedCount) 项（含社区真机验证批），其余 \(unguidedCount) 项按名称给推测注释（标注「推测」）。系统核心进程已上锁，其余可单独开关。")
                     .font(.system(size: 10.5))
                     .foregroundColor(.white.opacity(0.4))
                     .fixedSize(horizontal: false, vertical: true)
@@ -316,6 +320,7 @@ struct AllDaemonsView: View {
         let locked = DaemonRegistry.isProtected(info.label)
         let isOff = disabled.contains(info.label)
         let guided = DaemonRegistry.entry(byLabel: info.label)
+        let guess = guided == nil ? DaemonRegistry.guessGuide(info.label) : nil
 
         return HStack(alignment: .center, spacing: 11) {
             VStack(alignment: .leading, spacing: 3) {
@@ -336,6 +341,17 @@ struct AllDaemonsView: View {
                         Text(g.displayName)
                             .font(.system(size: 10.5, weight: .bold))
                             .foregroundColor(theme.primary.opacity(0.9))
+                    } else if let guess = guess {
+                        // 2.4.6：人工没写的按名称推测给一条，但必须亮明是推测
+                        Text(guess.service)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.55))
+                        Text("推测")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.white.opacity(0.12)))
+                            .foregroundColor(.white.opacity(0.5))
                     } else {
                         Text("未收录")
                             .font(.system(size: 9.5, weight: .bold))
@@ -411,6 +427,7 @@ struct AllDaemonsView: View {
         guard busyLabel == nil else { return }
         let isOff = disabled.contains(info.label)
         let guided = DaemonRegistry.entry(byLabel: info.label)
+        let guess = guided == nil ? DaemonRegistry.guessGuide(info.label) : nil
 
         if isOff {
             // 恢复启用不需要吓人，直接做
@@ -421,6 +438,19 @@ struct AllDaemonsView: View {
         let body: String
         if let g = guided {
             body = "标签：\(info.label)\n\n作用：\(g.summary)\n\n禁用后：\(g.impact)\n\n改动需要重启设备才生效，可在「备份与恢复」里撤销。"
+        } else if let guess = guess {
+            body = """
+            标签：\(info.label)
+            归属：\(displayName(for: info))
+            可执行：\(info.program.isEmpty ? "（无）" : info.program)
+
+            按名称推测（\(guess.service)）：\(guess.summary)
+
+            禁用后：\(guess.impact)
+
+            ⚠️ 这是按命名规律推测的注释，不是人工验证过的结论。
+            改动需要重启设备才生效，确认要关？
+            """
         } else {
             body = """
             标签：\(info.label)
@@ -436,7 +466,7 @@ struct AllDaemonsView: View {
         }
 
         alertItem = AlertItem(
-            title: Text(guided?.displayName ?? "禁用未收录项？"),
+            title: Text(guided?.displayName ?? (guess != nil ? guess!.service : "禁用未收录项？")),
             message: Text(body),
             primaryButton: .destructive(Text(guided == nil ? "仍然禁用" : "禁用")) {
                 performToggle(info, disabled: true)

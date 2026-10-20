@@ -13,7 +13,7 @@ concurrency:
 env:
   # 版本号只在这里写一次，下面全都是引用。
   # 改名/发新版时漏掉某处的老问题就是这么解决的。
-  APP_VERSION: "2.4.5"
+  APP_VERSION: "2.4.6"
 
 jobs:
   build:
@@ -237,42 +237,56 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "mdcX Max v${{ env.APP_VERSION }} (修复「浏览本机全部」点不动)"
+          name: "mdcX Max v${{ env.APP_VERSION }} (守护进程注释扩容 61→115 + 推测引擎)"
           files: |
             artifacts/ipa/*.ipa
             artifacts/dylib/*.dylib
             artifacts/bundle/*.zip
           body: |
-            ## mdcX Max v${{ env.APP_VERSION }} — 修复「浏览本机全部」入口点不动
+            ## mdcX Max v${{ env.APP_VERSION }} — 守护进程注释大扩容 + 按名称推测
 
-            ### 修复（2.4.5）
-            - **守护进程页的「浏览本机全部 N 项」点不动、进不去**：
-              2.4.4 给 List 挂了一个 `.onTapGesture`（本意是点空白处收起键盘），
-              而 iOS 15/16 上 List 挂 tap 手势会吞掉整张表的触摸 —— 表内的
-              NavigationLink 全部失灵，看起来有按下高亮但永远不跳转。
-              按钮类（一键禁用等）走的是独立手势所以不受影响，恰好掩盖了问题。
-            - 现把三处 List 上的 tap 手势全部移除（守护进程页 / 全部标签页 / 美化页），
-              键盘收起改用 `keyboardDismissMode`（滑动列表时收起），不再抢触摸。
-            - 全部标签页自身加载是异步的，push 进去后有个约一秒的扫描等待，
-              属正常现象。
+            ### 背景
+            - Apple 官方从不发布「哪些守护进程可以安全禁用」的清单 ——
+              官方文档（launchd.plist 手册、Daemons and Services Guide）只讲机制。
+              真正经过真机验证的结论在社区：威锋真机帖、MacRumors 经典清理清单、
+              Nugget（免越狱守护进程管理）与 Geranium 的守护进程分类。
+              本版本把这三方结论交叉整理进 App。
 
-            ### 沿用 2.4.4 的能力
-            - 「浏览本机全部 N 项」：本机全部 LaunchDaemon 按
-              第三方 App / 系统 App / 系统服务 分组，可按 App 名搜索，逐项开关
-            - 系统核心进程 40 项上锁不给开关（关错到起不来就只能刷机）
-            - 精选清单 30 → 50 项，新增 连续性与接力 / iCloud 与同步 两组
-            - 「重启设备」走 root 子进程 `reboot(2)`（真机已验证）
-            - 工具箱与美化页不再显示「文件清零」状态
+            ### 人工注释扩容：61 → 115 项
+            - 新增「崩溃与日志」分类（22 项）：DumpPanic / ReportCrash 家族 /
+              sysdiagnose / aslmanager / syslogd / stackshot / tcpdump / CHUD 调试
+              工具等 —— 全是"只收集报告，关了无损"的一批，多数可放心关。
+            - 遥测补遗：triald（Apple A/B 实验平台，社区反馈还会生成大量缓存）、
+              aggregated.addaily（广告日报）、securityuploadd、rtcreportingd、
+              usymptomsd、UsageTrackingAgent、ClarityBoard。
+            - 新增「账号与凭据」分类并明确劝退：AppleCredentialManagerDaemon /
+              accountsd / dataaccessd（邮件日历同步底座）——这些关了伤筋动骨。
+            - 新增「网络与共享」：个人热点、IPSec VPN、AirPrint。
+            - 配件类：iapd（车机/Lightning 配件）、otpaird、tvremoted 等。
+            - 语音辅助功能：voiced（语音控制，注意不是 Siri）、VoiceOverTouch（旁白）。
+            - 屏幕使用时间（ScreenTimeAgent）、家人共享、iTunes 云服务、
+              Spotlight 索引、后台任务调度等常用开关项。
+
+            ### 新增：按名称推测引擎
+            - 剩下没有人工注释的标签，按 Apple 命名规律给一条推测注释：
+              *Crash → 崩溃报告；*diagnos → 诊断调试；*analytics → 遥测统计；
+              *account/*auth → 账号认证（劝退）；*thermal/*power → 电源温控（劝退）等
+              共 19 条规则。
+            - 推测注释在界面上明确标注「推测」徽章，禁用确认弹窗里也会写明
+              「这是按命名规律推测的注释，不是人工验证过的结论」——
+              不假装知道每个进程的底细。
+
+            ### 沿用此前版本
+            - 「浏览本机全部」入口（2.4.5 已修复点不动的问题）
+            - 系统核心进程 40 项上锁、改动前快照、root 子进程 reboot(2) 硬重启
 
             ### 已知限制
-            - 守护进程与刷新率的改动**需要重启设备后生效**（launchd 只在启动时读
-              disabled.plist），界面与重启按钮已明示
-            - 未收录项没有任何人工验证，关错可能导致功能长期异常；
-              极端情况下设备无法开机，那种情况只能刷机，撤销也救不回来
+            - 守护进程与刷新率的改动**需要重启设备后生效**
+            - 推测注释仅供参考；人工批中 confidence 为「待实测」的条目
+              标签可能随 iOS 版本变化，以设备实际存在为准
             - 最低系统版本 iOS 15.6
 
             ### 安装要求
             - 必须使用 **TrollStore** 安装；AltStore / Sideloadly / 证书侧载无法授权 root
             - 分辨率 / 刷新率 / 注销 / 守护进程管理：iOS 15.6 及以上所有可用
               TrollStore 安装的版本，均不依赖 launchctl
-            - 刷新率在部分机型 / 版本上可能不被系统采纳，届时无变化、也不会损坏
