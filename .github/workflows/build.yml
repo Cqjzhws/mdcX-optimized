@@ -13,7 +13,7 @@ concurrency:
 env:
   # 版本号只在这里写一次，下面全都是引用。
   # 改名/发新版时漏掉某处的老问题就是这么解决的。
-  APP_VERSION: "2.4.4"
+  APP_VERSION: "2.4.5"
 
 jobs:
   build:
@@ -237,55 +237,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "mdcX Max v${{ env.APP_VERSION }} (全部标签可管 + 清单扩容)"
+          name: "mdcX Max v${{ env.APP_VERSION }} (修复「浏览本机全部」点不动)"
           files: |
             artifacts/ipa/*.ipa
             artifacts/dylib/*.dylib
             artifacts/bundle/*.zip
           body: |
-            ## mdcX Max v${{ env.APP_VERSION }} — 480 项全部可见、可逐项开关
+            ## mdcX Max v${{ env.APP_VERSION }} — 修复「浏览本机全部」入口点不动
 
-            ### 新增：浏览本机全部守护进程
-            - 2.4.3 及以前只有一份 30 项的人工清单，而本机
-              `/System/Library/LaunchDaemons` 里通常躺着 **480+** 个 plist ——
-              剩下那 450 多项在界面上完全看不见。现在守护进程页多了
-              「浏览本机全部 N 项」入口，本机每一项都在里面。
-            - 会解析每个 plist 的 `Program` / `RunAtLoad` / `KeepAlive`，
-              把 `application.<包名>.<编号>` 形式的标签还原成「属于哪个 App」，
-              并按 第三方 App / 系统 App / 系统服务 分组，可直接按 App 名搜索。
-            - App 名从 `/var/containers/Bundle/Application` 里读 Info.plist 得到，
-              读不到就退回显示包名，不影响功能。
-            - **系统核心进程一律上锁**（backboardd / configd / lockdownd /
-              CommCenter / powerd / thermalmonitord / 看门狗 等 40 项）：
-              这类项一旦关掉，设备可能直接起不来，而起不来就再也进不了 App 撤销，
-              只能刷机 —— 所以干脆不给开关。
-            - 其余未收录项可以逐项开关，每一条都要二次确认，并明确写出
-              「我没有收录它，不知道关掉会怎样」以及它的可执行文件路径。
-            - 刻意**不提供**「未收录项一键全禁」：那 450 项互相依赖，
-              一次全关基本等于白苹果，这种按钮不该存在。
+            ### 修复（2.4.5）
+            - **守护进程页的「浏览本机全部 N 项」点不动、进不去**：
+              2.4.4 给 List 挂了一个 `.onTapGesture`（本意是点空白处收起键盘），
+              而 iOS 15/16 上 List 挂 tap 手势会吞掉整张表的触摸 —— 表内的
+              NavigationLink 全部失灵，看起来有按下高亮但永远不跳转。
+              按钮类（一键禁用等）走的是独立手势所以不受影响，恰好掩盖了问题。
+            - 现把三处 List 上的 tap 手势全部移除（守护进程页 / 全部标签页 / 美化页），
+              键盘收起改用 `keyboardDismissMode`（滑动列表时收起），不再抢触摸。
+            - 全部标签页自身加载是异步的，push 进去后有个约一秒的扫描等待，
+              属正常现象。
 
-            ### 精选清单扩容：30 → 50 项
-            - 新增两个分组：**连续性与接力**（AirDrop / 接力 / 设备互联）、
-              **iCloud 与同步**（云盘同步 / iCloud 备份 / 私密中继 / 查找我的 iPhone）。
-            - 遥测诊断补 4 项：电量日志采集 `powerlogd`、统一诊断 `diagnosticd`、
-              崩溃报告 `ReportCrash.Root`、分析整理 `osanalyticshelper`
-              —— 都是长期写盘 / 空转的常客。
-            - 建议与学习补 `mediaanalysisd`（媒体内容分析）、`duetexpertd`（预测引擎）。
-            - 语音助手补 `siriknowledged`、`siriinferenced`。
-            - 商店与内容补 `itunesstored`、`appstored`、`adprivacyd`。
-            - 位置与查找补 `searchpartyd`（查找网络离线定位）。
-            - 「推荐组合」随之扩容，仍然只收低风险项。
-
-            ### 去掉碍眼的「文件清零」状态
-            - 工具箱兼容性里那行「文件清零（MacDirtyCow）」永远是一个橙色的
-              「不支持」—— 本机 iOS 16.2 的这个漏洞早就修补了，那一行既不能点
-              也没有信息量，整行删除。
-            - 美化页 Hero 卡上的「零页已修补」橙点同样删除。
-            - 分辨率检测顺手改成只算一次（原来同一行里连调了三次 detect）。
-
-            ### 沿用 2.4.3 的修复
-            - 「重启设备」改为在 root 子进程里直接调用 `reboot(0x08000004)`
-              （真机已验证可用）；失败会如实弹出原因，不再假装成功。
+            ### 沿用 2.4.4 的能力
+            - 「浏览本机全部 N 项」：本机全部 LaunchDaemon 按
+              第三方 App / 系统 App / 系统服务 分组，可按 App 名搜索，逐项开关
+            - 系统核心进程 40 项上锁不给开关（关错到起不来就只能刷机）
+            - 精选清单 30 → 50 项，新增 连续性与接力 / iCloud 与同步 两组
+            - 「重启设备」走 root 子进程 `reboot(2)`（真机已验证）
+            - 工具箱与美化页不再显示「文件清零」状态
 
             ### 已知限制
             - 守护进程与刷新率的改动**需要重启设备后生效**（launchd 只在启动时读

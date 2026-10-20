@@ -399,10 +399,11 @@ struct DaemonView: View {
         }
         .listStyle(.insetGrouped)
         .background(Color.clear)
-        .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                            to: nil, from: nil, for: nil)
-        }
+        // 注意：这里绝不能挂 .onTapGesture（哪怕只是用来收键盘）。
+        // iOS 15/16 上 List 挂 tap 手势会吞掉整张表的触摸，
+        // 表内所有 NavigationLink 全部失灵（Button 走自己的手势不受影响）。
+        // 键盘收起改由 UITableView.appearance().keyboardDismissMode 处理，
+        // 见 mdcXApp.init()。
     }
 
     private var requirementsView: some View {

@@ -308,10 +308,8 @@ struct AllDaemonsView: View {
         }
         .listStyle(.insetGrouped)
         .background(Color.clear)
-        .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                            to: nil, from: nil, for: nil)
-        }
+        // 键盘收起交给全局 UITableView.appearance().keyboardDismissMode（mdcXApp.init）。
+        // 这里不能挂 .onTapGesture：List 挂 tap 手势会吞触摸，行内的按钮/链接会失灵。
     }
 
     private func row(_ info: DaemonManager.DaemonInfo) -> some View {

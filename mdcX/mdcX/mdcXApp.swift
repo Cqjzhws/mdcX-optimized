@@ -108,6 +108,9 @@ struct mdcXApp: App {
         // List/Table 背景透明化，交给自定义底色
         UITableView.appearance().backgroundColor = .clear
         UITableViewCell.appearance().backgroundColor = .clear
+        // 滑动列表时收起键盘（替代之前挂在 List 上的 onTapGesture ——
+        // 那个手势会吞触摸，导致 List 里的 NavigationLink 点不动）
+        UITableView.appearance().keyboardDismissMode = .onDrag
     }
 
     var body: some Scene {

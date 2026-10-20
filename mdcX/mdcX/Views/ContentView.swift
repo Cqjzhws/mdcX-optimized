@@ -465,11 +465,8 @@ struct ContentView: View {
         }
         .listStyle(.insetGrouped)
         .background(Color.clear)
-        .onTapGesture {
-            // 点击列表空白处收起键盘
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                            to: nil, from: nil, for: nil)
-        }
+        // 键盘收起交给全局 UITableView.appearance().keyboardDismissMode（mdcXApp.init）。
+        // List 上挂 .onTapGesture 会吞触摸，让行内可点元素失灵。
     }
 
     private func categoryHeader(_ category: String) -> some View {
