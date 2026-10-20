@@ -13,7 +13,7 @@ concurrency:
 env:
   # 版本号只在这里写一次，下面全都是引用。
   # 改名/发新版时漏掉某处的老问题就是这么解决的。
-  APP_VERSION: "2.4.2"
+  APP_VERSION: "2.4.3"
 
 jobs:
   build:
@@ -244,14 +244,25 @@ jobs:
             artifacts/dylib/*.dylib
             artifacts/bundle/*.zip
           body: |
-            ## mdcX Max v${{ env.APP_VERSION }} — 守护进程管理增强
+            ## mdcX Max v${{ env.APP_VERSION }} — 修复「重启设备」不重启
+
+            ### 修复（2.4.3）
+            - **「重启设备」按钮点了没反应**：2.4.2 走的是「spawn 系统 reboot 二进制」，
+              而 iOS 上 `/sbin/reboot`、`/usr/sbin/reboot` 根本不存在（与 launchctl
+              同一类误判），两个候选被逐个跳过；兜底的 `killall -9 launchd` 同样无效 ——
+              pid 1 不吃 SIGKILL。于是函数「成功」返回、设备纹丝不动。
+            - 现改为 **在 root 子进程里直接调用 `reboot(2)` 系统调用**：
+              把 App 自身以 root 再执行一份（persona-mgmt，带 `--mdcx-reboot-helper`），
+              由子进程在进入 UI 之前调用 `reboot(0x08000004)`。
+              这是 iOS 上唯一可靠的重启方式（同为 Cqjzhws 的 SIOriginal 已在真机验证）。
+            - 失败不再假装成功：助手里 `reboot(2)` 被拒时以退出码 42 返回，界面会
+              如实弹出失败原因与已尝试的路径，而不是静默无反应。
+            - 顺带修正 RB_AUTOBOOT 的取值：写成 0 会必然 `EINVAL`（Darwin 真值 0x08000004）。
 
             ### 新增（2.4.2）
             - **硬重启按钮**：守护进程的改动只在设备开机时由 launchd 读取，
               普通的「注销」（仅重启 SpringBoard）不会让它生效，必须真重启。
-              新增「重启设备」按钮（Hero 卡常驻 + 批量完成后弹确认），
-              经 TrollStore persona-mgmt 以 root 调用系统 reboot 二进制；
-              找不到 reboot 时兜底强杀 launchd（pid 1）强制重启。
+              新增「重启设备」按钮（Hero 卡常驻 + 批量完成后弹确认）。
             - **一键全部禁用**：禁用本机存在、非系统关键、且当前启用的全部守护进程。
               二次确认 + 自动存快照 + 完成后提示重启，与场景按钮共用回滚机制。
             - 启动日志版本号改为读取真实 Bundle 版本（不再写死「2.3.7 已就绪」）。

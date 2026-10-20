@@ -36,6 +36,7 @@ struct DaemonView: View {
 
     @State private var sessionDisabled = 0
     @State private var sessionEnabled = 0
+    @State private var isRebooting = false
 
     private var theme: AppTheme { settings.theme }
     private var anyBusy: Bool { isBusy || isWorking }
@@ -190,9 +191,9 @@ struct DaemonView: View {
                         requestReboot()
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise.circle.fill")
+                            Image(systemName: isRebooting ? "hourglass" : "arrow.clockwise.circle.fill")
                                 .font(.system(size: 11))
-                            Text("重启设备")
+                            Text(isRebooting ? "重启中…" : "重启设备")
                                 .font(.system(size: 11, weight: .bold))
                         }
                         .foregroundColor(.white)
@@ -201,7 +202,7 @@ struct DaemonView: View {
                         .background(Capsule().fill(Color.white.opacity(0.10)))
                     }
                     .buttonStyle(.plain)
-                    .disabled(anyBusy || !isAvailable)
+                    .disabled(anyBusy || !isAvailable || isRebooting)
                     StatPill(icon: "moon.zzz.fill", value: disabledLabels.count, tint: .orange)
                     StatPill(icon: "checkmark", value: sessionDisabled, tint: .green)
                     StatPill(icon: "arrow.uturn.backward", value: sessionEnabled, tint: .blue)
@@ -644,9 +645,27 @@ struct DaemonView: View {
     }
 
     private func doReboot() {
-        logStore.append("正在请求设备重启…", level: .info)
+        guard !isRebooting else { return }
+        isRebooting = true
+        isBusy = true
+        logStore.append("正在请求重启（root · reboot 系统调用）…", level: .info)
         DispatchQueue.global(qos: .userInitiated).async {
-            _ = RootProc.rebootDevice()
+            let report = RootProc.rebootDevice()
+            DispatchQueue.main.async {
+                if report.succeeded {
+                    // 设备正在关闭，界面保持不可交互
+                    logStore.append("重启请求已发出，设备即将关闭。（\(report.detail)）", level: .success)
+                } else {
+                    isRebooting = false
+                    isBusy = false
+                    logStore.append("重启失败：\(report.detail)", level: .error)
+                    alertItem = AlertItem(
+                        title: Text("重启失败"),
+                        message: Text(report.detail + "\n\n已尝试：\n" + report.triedPaths.joined(separator: "\n")),
+                        primaryButton: .default(Text("知道了")),
+                        secondaryButton: nil)
+                }
+            }
         }
     }
 

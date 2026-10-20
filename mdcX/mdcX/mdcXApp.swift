@@ -61,7 +61,27 @@ struct RootView: View {
     }
 }
 
+// MARK: - 启动入口（2.4.3）
+//
+// 硬重启必须在 root 进程里直接调 reboot(2)，而 reboot(2) 只能作用于调用者自身。
+// 所以「重启设备」的实际做法是：把本 App 以 root 再起一份、带上 TSRebootHelperFlag，
+// 那一份在进 UI 之前（下面这个 main 的最开头）就调 reboot 并把自己结束掉。
+//
+// 时机刻意与 SIOriginal 对齐：main 开头，而不是 __attribute__((constructor))。
+// constructor 阶段进程的 persona uid 是否已经生效没有真机验证过，不冒这个险。
+
 @main
+struct mdcXEntry {
+    static func main() {
+        if TSRootSpawn.isRebootHelperLaunch() {
+            // 成功则设备重启、不返回；失败内部会 _exit(42)
+            TSRootSpawn.performRebootHelper()
+            return
+        }
+        mdcXApp.main()
+    }
+}
+
 struct mdcXApp: App {
     init() {
         // 保留系统动画（加速由 SwiftUI 层的统一短时长控制）

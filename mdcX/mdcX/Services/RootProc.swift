@@ -346,27 +346,70 @@ enum RootProc {
 
     // MARK: - 设备重启（让守护进程改动生效）
 
-    /// 硬重启设备。守护进程改动只在系统启动时由 launchd 读取，
+    /// 硬重启设备（不是注销）。守护进程改动只在系统启动时由 launchd 读取，
     /// 普通的「注销」（杀 SpringBoard）只重启 UI、不重启 launchd，因此无效，必须真重启。
     ///
-    /// 优先级：系统 reboot 二进制（/sbin、/usr/sbin、/bin）→ 兜底强杀 launchd（pid 1）。
-    /// 经 TrollStore persona-mgmt 启动的子进程以 uid 0 运行，reboot 系统调用才会成功；
-    /// 若连 reboot 二进制都找不到，则 fall back 到 `killall -9 launchd` ——
-    /// 强杀 pid 1 会触发内核强制重启（不优雅但一定成功，且 killall 是包内自带、必然存在）。
-    @discardableResult
+    /// 2.4.2 的写法是错的，真机上表现为「点了没反应」：
+    ///   ① iOS 上 /sbin/reboot、/usr/sbin/reboot 根本不存在，那两个候选全被跳过；
+    ///   ② 兜底的 `killall -9 launchd` 也无效 —— pid 1 不吃 SIGKILL。
+    ///   于是函数"成功"返回，设备纹丝不动。
+    ///
+    /// 现在改走已被同作者 SIOriginal 在真机验证过的路径：
+    /// 把自身以 root 再起一份，由子进程在 main 里（进 UI 之前）直接调用
+    /// `reboot(RB_AUTOBOOT)` —— 这是 iOS 上唯一可靠的重启方式。
+    ///
+    /// - Returns: `succeeded == false` 时 detail 里是**真实**失败原因，不再假装成功。
     static func rebootDevice() -> RootExecReport {
-        for dir in ["/sbin", "/usr/sbin", "/bin"] {
+        var tried: [String] = []
+
+        // 路径一（主路径）：root 子进程里直接 reboot(2)
+        if hasPersonaEntitlement {
+            let selfPath = Bundle.main.executablePath ?? "self"
+            tried.append("\(selfPath) \(TSRebootHelperFlag)")
+            let code = TSRootSpawn.spawnSelfAsRootWaiting(forExit: [TSRebootHelperFlag],
+                                                          timeout: 8)
+            switch code {
+            case 0, -202:
+                // 0 = 子进程正常退出（极少见）；-202 = 8 秒内仍在运行，
+                // 说明 reboot(2) 已发起、设备正在关闭，来不及返回了
+                return RootExecReport(succeeded: true, usedPath: selfPath,
+                                      method: "reboot(2) @ root",
+                                      detail: "已在 root 子进程中调用 reboot 系统调用",
+                                      triedPaths: tried)
+            case -200:
+                NSLog("[RootProc] 重启助手 spawn 失败，转入降级路径")
+            case 42:
+                NSLog("[RootProc] 重启助手内 reboot(2) 返回失败（权限不足？）")
+            default:
+                NSLog("[RootProc] 重启助手退出码 %d，转入降级路径", code)
+            }
+        } else {
+            tried.append("persona-mgmt 缺失，跳过 reboot(2)")
+        }
+
+        // 路径二：系统 reboot 二进制（仅老系统 / 越狱环境存在，保留作兼容）
+        for dir in ["/usr/sbin", "/sbin", "/usr/bin"] {
             let bin = (dir as NSString).appendingPathComponent("reboot")
             guard FileManager.default.isExecutableFile(atPath: bin) else { continue }
+            tried.append(bin)
             let code = runPrivileged(bin, arguments: [])
             if code == 0 {
                 return RootExecReport(succeeded: true, usedPath: bin,
-                                      method: "reboot", detail: "已请求设备重启",
-                                      triedPaths: [bin])
+                                      method: "reboot binary",
+                                      detail: "已调用 \(bin)",
+                                      triedPaths: tried)
             }
         }
-        // 兜底：强杀 launchd（pid 1），强制内核重启
-        return execute(arguments: ["-9", "launchd"])
+
+        // 路径三：强杀 launchd（几乎必然无效，仅保留最后一点尝试）
+        tried.append("killall -9 launchd")
+        let kill = execute(arguments: ["-9", "launchd"])
+
+        return RootExecReport(succeeded: false, usedPath: kill.usedPath,
+                              method: "none",
+                              detail: "所有重启路径均失败。reboot(2) 可能被系统拒绝"
+                                    + "（请确认是 TrollStore 安装、且设备未开启锁定）",
+                              triedPaths: tried)
     }
 
     // MARK: - 通用 root 执行（2.4.0 · 守护进程管理与显示调节共用）
