@@ -182,9 +182,9 @@ jobs:
           2. mdcXCore.dylib — arm64 核心利用库（导出 mdcx_zero_file /
              mdcx_overwrite_file / mdcx_core_version）。
 
-         3. App 包内的 mdcxboost.dylib — mdcX Boost 自研运行时加速引擎。
-            用 TrollFools 把它注入 SpringBoard / 目标 App 后，在本 App「加速」页
-            选档位即可生效（动画/响应/启动/后台保活）。改档位无需重新注入。
+          3. App 包内的 mdcxboost.dylib — mdcX Boost 自研运行时加速引擎。
+             用 TrollFools 把它注入 SpringBoard / 目标 App 后，在本 App「加速」页
+             选档位即可生效（动画/响应/启动/后台保活）。改档位无需重新注入。
           EOF
           cd build/bundle
           zip -qr mdcX-Max-${APP_VERSION}-bundle.zip mdcX-Max-${APP_VERSION}
