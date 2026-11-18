@@ -9,6 +9,9 @@ import SwiftUI
 
 enum TweakActionType {
     case zeroOutFiles(paths: [String])
+    /// mdcX Boost 运行时加速项：不清零文件，由 BoostManager 写入共享配置并通知注入的 dylib。
+    /// associated value 仅用于 UI 展示，真实参数由 BoostConfig 管理。
+    case runtimeBoost(boosterID: String)
 }
 
 /// 风险等级：决定卡片上的视觉标记与「一键推荐」是否纳入。
@@ -60,6 +63,7 @@ struct Tweak: Identifiable {
     var targetPaths: [String] {
         switch action {
         case .zeroOutFiles(let paths): return paths
+        case .runtimeBoost: return []   // 加速项不触碰系统文件，无需备份
         }
     }
 }

@@ -49,7 +49,7 @@ static BOOL MDCArgvContains(const char *needle) {
 }
 
 + (void)performRebootHelper {
-    // 这里的执行时机与 SIOriginal 完全一致：进程已由 persona spawn 提为 root，
+    // 这里的执行时机：进程已由 persona spawn 提为 root，
     // 且已过 dyld/ObjC 初始化、进入 App 自己的 main。这是真机验证过的位置。
     reboot(RB_AUTOBOOT);   // 成功即设备重启，本调用不会返回
 

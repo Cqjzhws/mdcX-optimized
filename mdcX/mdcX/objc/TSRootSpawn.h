@@ -43,7 +43,7 @@ extern NSString *const TSRebootHelperFlag;
 /// 执行特权重启：先 `reboot(RB_AUTOBOOT)`，被拒则兜底强杀 launchd。
 ///
 /// 成功时设备立即重启、本调用不会返回；失败时 `_exit(42)`。
-/// 调用点必须与 SIOriginal 一致 —— App 自己的 main 最开头（已过 dyld/ObjC 初始化，
+/// 调用点必须在 App 自己的 main 最开头（已过 dyld/ObjC 初始化，
 /// 且进程已被 persona spawn 提为 root），过早（如 constructor）没有真机验证过。
 + (void)performRebootHelper;
 

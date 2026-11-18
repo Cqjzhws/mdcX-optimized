@@ -19,7 +19,8 @@ enum TweakRegistry {
         TweakCategory(key: "Notifications", icon: "bell.badge.fill",       color: .orange),
         TweakCategory(key: "Lockscreen",    icon: "lock.shield.fill",      color: .red),
         TweakCategory(key: "Control Center",icon: "switch.2",              color: .mint),
-        TweakCategory(key: "Sounds",        icon: "speaker.wave.3.fill",   color: .pink)
+        TweakCategory(key: "Sounds",        icon: "speaker.wave.3.fill",   color: .pink),
+        TweakCategory(key: "Performance",   icon: "bolt.fill",             color: .yellow)
     ]
 
     static func metadata(for category: String) -> TweakCategory {
@@ -265,7 +266,47 @@ enum TweakRegistry {
                 "\(uiSounds)/nano/AntennaGain.caf",
                 "\(uiSounds)/nano/AntennaLost.caf"
               ]),
-              category: "Sounds", icon: "antenna.radiowaves.left.and.right", risk: .advanced)
+              category: "Sounds", icon: "antenna.radiowaves.left.and.right", risk: .advanced),
+
+        // ============ Performance（mdcX Boost 自研运行时加速，非文件清零）============
+        // 这些项不修改任何系统文件，通过写入共享配置通知已注入的 mdcxboost.dylib 生效。
+        // 详细档位/开关请在「加速」标签页操作；此处提供一键入口，保持与美化项一致的交互。
+
+        Tweak(tid: "boost_enable",
+              name: "开启终极加速",
+              description: "启用 mdcX Boost 运行时加速引擎（动画/响应/启动/后台保活）。需先用 TrollFools 把 mdcxboost.dylib 注入到目标进程。",
+              action: .runtimeBoost(boosterID: "boost_enable"),
+              category: "Performance", icon: "bolt.fill", recommended: true),
+
+        Tweak(tid: "boost_profile_safe",
+              name: "加速档位 · 安全 8×",
+              description: "保守加速，优先稳定性。适合日常与第三方重 App。",
+              action: .runtimeBoost(boosterID: "boost_profile_safe"),
+              category: "Performance", icon: "shield.fill"),
+
+        Tweak(tid: "boost_profile_bal",
+              name: "加速档位 · 均衡 24×",
+              description: "速度与稳定兼顾（推荐日常使用）。",
+              action: .runtimeBoost(boosterID: "boost_profile_bal"),
+              category: "Performance", icon: "gauge.medium", recommended: true),
+
+        Tweak(tid: "boost_profile_turbo",
+              name: "加速档位 · 极速 50×",
+              description: "全速模式，配合保护名单与安全熔断，命中易崩 App 自动降档。",
+              action: .runtimeBoost(boosterID: "boost_profile_turbo"),
+              category: "Performance", icon: "bolt.fill"),
+
+        Tweak(tid: "boost_reset",
+              name: "恢复加速默认配置",
+              description: "档位、开关、保护名单全部恢复出厂值（均衡档）。",
+              action: .runtimeBoost(boosterID: "boost_reset"),
+              category: "Performance", icon: "arrow.counterclockwise"),
+
+        Tweak(tid: "boost_disable",
+              name: "关闭加速",
+              description: "关闭 mdcX Boost 总开关，已注入进程即时停止加速。",
+              action: .runtimeBoost(boosterID: "boost_disable"),
+              category: "Performance", icon: "bolt.slash.fill")
     ]
 
     // MARK: 便捷查询

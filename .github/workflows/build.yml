@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: mdcx-build-main
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   # 版本号只在这里写一次，下面全都是引用。
