@@ -1,4 +1,4 @@
-﻿name: Build IPA + dylib
+name: Build IPA + dylib
 
 on:
   push:
