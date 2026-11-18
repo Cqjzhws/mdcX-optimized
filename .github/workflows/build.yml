@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: mdcx-build-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   # 版本号只在这里写一次，下面全都是引用。
@@ -104,6 +104,20 @@ jobs:
           codesign -d --entitlements - "$APP_PATH/mdcX" 2>&1 | head -40 || true
           ls -la "$APP_PATH"
 
+          # -----------------------------------------------------------
+          # 内置 mdcX Boost 自研加速 dylib（随 IPA 分发，供 TrollFools 注入目标进程）
+          # 这是本次新增：mdcX 主 App 的「加速」页负责写配置，真正的运行时 hook
+          # 由这份 dylib 注入 SpringBoard/目标 App 后生效。
+          # -----------------------------------------------------------
+          BOOST_DYLIB="${GITHUB_WORKSPACE}/Boost/out/mdcxboost.dylib"
+          if [ -f "$BOOST_DYLIB" ]; then
+            cp "$BOOST_DYLIB" "$APP_PATH/mdcxboost.dylib"
+            chmod 644 "$APP_PATH/mdcxboost.dylib"
+            echo "Bundled mdcxboost.dylib into app ($(stat -f%z "$APP_PATH/mdcxboost.dylib") bytes)"
+          else
+            echo "WARNING: Boost/out/mdcxboost.dylib not found; accel page will have no engine to inject"
+          fi
+
           echo "Packing IPA manually..."
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
@@ -168,6 +182,10 @@ jobs:
 
           2. mdcXCore.dylib — arm64 核心利用库（导出 mdcx_zero_file /
              mdcx_overwrite_file / mdcx_core_version）。
+
+          3. App 包内的 mdcxboost.dylib — mdcX Boost 自研运行时加速引擎。
+             用 TrollFools 把它注入 SpringBoard / 目标 App 后，在本 App「加速」页
+             选档位即可生效（动画/响应/启动/后台保活）。改档位无需重新注入。
           EOF
           cd build/bundle
           zip -qr mdcX-Max-${APP_VERSION}-bundle.zip mdcX-Max-${APP_VERSION}
