@@ -1,0 +1,307 @@
+name: Build mdcX Boost IPA
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mdcx-build-main
+  cancel-in-progress: true
+
+env:
+  # 版本号只在这里写一次，下面全都是引用。
+  # 改名/发新版时漏掉某处的老问题就是这么解决的。
+  APP_VERSION: "2.4.6"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Ensure helper executable bit
+        run: chmod +x mdcX/tools/killall || true
+
+      # 本流程不签任何 ldid 二进制：主程序用 codesign，包内 killall 刻意保持原签名。
+      # 所以安装 ldid 这一步纯属白等一次 brew install，删掉。
+
+      # ---------------------------------------------------------------
+      # 1) 构建 App（未签名）
+      # ---------------------------------------------------------------
+      - name: Build & Archive App
+        id: build
+        run: |
+          cd mdcX
+          SCHEME="mdcX"
+
+          xcodebuild \
+            -project mdcX.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/mdcX.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            ENABLE_SANDBOX=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            CLEAN_BUILD_FOLDER=YES \
+            archive 2>&1 | tee build.log
+
+          if ! grep -q "ARCHIVE SUCCEEDED" build.log; then
+            echo "Archive FAILED"
+            tail -120 build.log
+            exit 1
+          fi
+
+          echo "Archive OK."
+
+          APP_PATH=$(find build/mdcX.xcarchive/Products/Applications -name "*.app" -maxdepth 1 -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found in archive"
+            ls -la build/mdcX.xcarchive/Products/Applications/ || echo "No Applications dir"
+            exit 1
+          fi
+          echo "Found app: $APP_PATH"
+
+          # -----------------------------------------------------------
+          # 注入 TrollStore 特权 entitlements（关键！）
+          # 不注入时 App 即使经 TrollStore 安装仍被沙盒限制，
+          # 无法写 /var/mobile/Library/Preferences，分辨率/注销全部失效。
+          # TrollStore 安装时会保留二进制内嵌的 entitlements 并重新签发。
+          # -----------------------------------------------------------
+          ENT_FILE="${GITHUB_WORKSPACE}/mdcX/mdcX.entitlements"
+          echo "Injecting entitlements: $ENT_FILE"
+          # 校验并规范化（消除潜在 BOM/格式问题，AMFIUnserializeXML 极挑剔）
+          plutil -lint "$ENT_FILE"
+          xxd "$ENT_FILE" | head -2
+          plutil -convert xml1 -o "$ENT_FILE" "$ENT_FILE"
+          plutil -lint "$ENT_FILE"
+          # ---- killall：不重签、不注入 entitlement ----
+          # TrollStore 2 / iOS16 官方 root 方案是「主 App 带 com.apple.private.persona-mgmt，
+          # posix_spawn 时设 persona 99/uid0」，killall 自身无需 setuid/特权。
+          # 且官方明确：ldid 签名的二进制在 iOS 16+ 不工作；
+          # 现代 codesign 重签这份老式 killall 又报 internal error。
+          # 因此保持其原始（来自系统的有效）签名，仅确保可执行位。
+          chmod 755 "$APP_PATH/killall"
+          file "$APP_PATH/killall"
+
+          # ---- 签主程序并注入特权 entitlements（含 persona-mgmt，root spawn 的钥匙）----
+          codesign --force --sign - --entitlements "$ENT_FILE" "$APP_PATH/mdcX"
+
+          echo "== Embedded entitlements =="
+          codesign -d --entitlements - "$APP_PATH/mdcX" 2>&1 | head -40 || true
+          ls -la "$APP_PATH"
+
+          # -----------------------------------------------------------
+          # 内置 mdcX Boost 自研加速 dylib（随 IPA 分发，供 TrollFools 注入目标进程）
+          # 这是本次新增：mdcX 主 App 的「加速」页负责写配置，真正的运行时 hook
+          # 由这份 dylib 注入 SpringBoard/目标 App 后生效。
+          # -----------------------------------------------------------
+          BOOST_DYLIB="${GITHUB_WORKSPACE}/Boost/out/mdcxboost.dylib"
+          if [ -f "$BOOST_DYLIB" ]; then
+            cp "$BOOST_DYLIB" "$APP_PATH/mdcxboost.dylib"
+            chmod 644 "$APP_PATH/mdcxboost.dylib"
+            echo "Bundled mdcxboost.dylib into app ($(stat -f%z "$APP_PATH/mdcxboost.dylib") bytes)"
+          else
+            echo "WARNING: Boost/out/mdcxboost.dylib not found; accel page will have no engine to inject"
+          fi
+
+          echo "Packing IPA manually..."
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          cd build/ipa
+          IPA_NAME="mdcX_Max_v${APP_VERSION}.ipa"
+          zip -qr "$IPA_NAME" Payload -x "*.DS_Store"
+          ls -la "$IPA_NAME"
+          echo "IPA_PATH=$(pwd)/$IPA_NAME" >> $GITHUB_OUTPUT
+          cd ../..
+
+          echo "Generated unsigned IPA at ${{ steps.build.outputs.IPA_PATH }}"
+
+      # ---------------------------------------------------------------
+      # 2) 编译独立 dylib 核心库（arm64 iOS，ad-hoc 签名）
+      # ---------------------------------------------------------------
+      - name: Build mdcXCore.dylib
+        id: dylib
+        run: |
+          set -e
+          mkdir -p build/dylib
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "Using SDK: $SDK"
+
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -dynamiclib \
+            -O2 \
+            -fvisibility=hidden \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=15.0 \
+            -install_name @executable_path/mdcXCore.dylib \
+            -o build/dylib/mdcXCore.dylib \
+            dylib/mdcx_core.c
+
+          codesign --sign - --force --timestamp=none build/dylib/mdcXCore.dylib || true
+
+          xcrun -sdk iphoneos lipo -info build/dylib/mdcXCore.dylib || file build/dylib/mdcXCore.dylib
+          otool -L build/dylib/mdcXCore.dylib | head -5
+          echo "DYLIB_PATH=$(pwd)/build/dylib/mdcXCore.dylib" >> $GITHUB_OUTPUT
+
+      # ---------------------------------------------------------------
+      # 3) 打包合集 zip（IPA + dylib + 说明）
+      # ---------------------------------------------------------------
+      - name: Assemble bundle
+        id: bundle
+        run: |
+          set -e
+          mkdir -p build/bundle/mdcX-Max-${APP_VERSION}
+          cp "${{ steps.build.outputs.IPA_PATH }}" build/bundle/mdcX-Max-${APP_VERSION}/
+          cp "${{ steps.dylib.outputs.DYLIB_PATH }}" build/bundle/mdcX-Max-${APP_VERSION}/
+          cat > build/bundle/mdcX-Max-${APP_VERSION}/INSTALL.txt <<EOF
+          mdcX Max v${APP_VERSION}
+          ====================================
+          1. mdcX_Max_v${APP_VERSION}.ipa — 必须使用 TrollStore 安装。
+             本版本已注入 no-sandbox / platform-application 特权，
+             分辨率修改与注销（killall root helper）才可正常工作。
+             AltStore / Sideloadly 等普通侧载无法授予 root。
+
+             分辨率 / 刷新率 / 注销 / 守护进程管理：
+                 iOS 15.6 及以上所有可用 TrollStore 安装的版本
+             —— 守护进程与刷新率的改动需要重启设备后生效
+
+          2. mdcXCore.dylib — arm64 核心利用库（导出 mdcx_zero_file /
+             mdcx_overwrite_file / mdcx_core_version）。
+
+         3. App 包内的 mdcxboost.dylib — mdcX Boost 自研运行时加速引擎。
+            用 TrollFools 把它注入 SpringBoard / 目标 App 后，在本 App「加速」页
+            选档位即可生效（动画/响应/启动/后台保活）。改档位无需重新注入。
+          EOF
+          cd build/bundle
+          zip -qr mdcX-Max-${APP_VERSION}-bundle.zip mdcX-Max-${APP_VERSION}
+          echo "BUNDLE_PATH=$(pwd)/mdcX-Max-${APP_VERSION}-bundle.zip" >> $GITHUB_OUTPUT
+
+      # ---------------------------------------------------------------
+      # 4) 上传 Artifacts
+      # ---------------------------------------------------------------
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdcX-Max-${{ env.APP_VERSION }}-IPA
+          path: ${{ steps.build.outputs.IPA_PATH }}
+          retention-days: 60
+
+      - name: Upload dylib artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdcXCore-${{ env.APP_VERSION }}-dylib
+          path: ${{ steps.dylib.outputs.DYLIB_PATH }}
+          retention-days: 60
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdcX-Max-${{ env.APP_VERSION }}-bundle
+          path: ${{ steps.bundle.outputs.BUNDLE_PATH }}
+          retention-days: 60
+
+  # ---------------------------------------------------------------
+  # 5) 打 tag 时自动发布 Release
+  #
+  # 原先发布是另一个 workflow_dispatch，要人工把 build 的 run_id 填进去 ——
+  # 2.3.1 到 2.3.7 连发七次就是这么来的。现在与构建同属一条流水线，
+  # 可以直接取到自己的产物，推 tag 即出 Release。
+  # ---------------------------------------------------------------
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcX-Max-${{ env.APP_VERSION }}-IPA
+          path: artifacts/ipa
+
+      - name: Download dylib artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcXCore-${{ env.APP_VERSION }}-dylib
+          path: artifacts/dylib
+
+      - name: Download bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mdcX-Max-${{ env.APP_VERSION }}-bundle
+          path: artifacts/bundle
+
+      - name: Inspect
+        run: find artifacts -type f -print0 | xargs -0 ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "mdcX Max v${{ env.APP_VERSION }} (守护进程注释扩容 61→115 + 推测引擎)"
+          files: |
+            artifacts/ipa/*.ipa
+            artifacts/dylib/*.dylib
+            artifacts/bundle/*.zip
+          body: |
+            ## mdcX Max v${{ env.APP_VERSION }} — 守护进程注释大扩容 + 按名称推测
+
+            ### 背景
+            - Apple 官方从不发布「哪些守护进程可以安全禁用」的清单 ——
+              官方文档（launchd.plist 手册、Daemons and Services Guide）只讲机制。
+              真正经过真机验证的结论在社区：威锋真机帖、MacRumors 经典清理清单、
+              Nugget（免越狱守护进程管理）与 Geranium 的守护进程分类。
+              本版本把这三方结论交叉整理进 App。
+
+            ### 人工注释扩容：61 → 115 项
+            - 新增「崩溃与日志」分类（22 项）：DumpPanic / ReportCrash 家族 /
+              sysdiagnose / aslmanager / syslogd / stackshot / tcpdump / CHUD 调试
+              工具等 —— 全是"只收集报告，关了无损"的一批，多数可放心关。
+            - 遥测补遗：triald（Apple A/B 实验平台，社区反馈还会生成大量缓存）、
+              aggregated.addaily（广告日报）、securityuploadd、rtcreportingd、
+              usymptomsd、UsageTrackingAgent、ClarityBoard。
+            - 新增「账号与凭据」分类并明确劝退：AppleCredentialManagerDaemon /
+              accountsd / dataaccessd（邮件日历同步底座）——这些关了伤筋动骨。
+            - 新增「网络与共享」：个人热点、IPSec VPN、AirPrint。
+            - 配件类：iapd（车机/Lightning 配件）、otpaird、tvremoted 等。
+            - 语音辅助功能：voiced（语音控制，注意不是 Siri）、VoiceOverTouch（旁白）。
+            - 屏幕使用时间（ScreenTimeAgent）、家人共享、iTunes 云服务、
+              Spotlight 索引、后台任务调度等常用开关项。
+
+            ### 新增：按名称推测引擎
+            - 剩下没有人工注释的标签，按 Apple 命名规律给一条推测注释：
+              *Crash → 崩溃报告；*diagnos → 诊断调试；*analytics → 遥测统计；
+              *account/*auth → 账号认证（劝退）；*thermal/*power → 电源温控（劝退）等
+              共 19 条规则。
+            - 推测注释在界面上明确标注「推测」徽章，禁用确认弹窗里也会写明
+              「这是按命名规律推测的注释，不是人工验证过的结论」——
+              不假装知道每个进程的底细。
+
+            ### 沿用此前版本
+            - 「浏览本机全部」入口（2.4.5 已修复点不动的问题）
+            - 系统核心进程 40 项上锁、改动前快照、root 子进程 reboot(2) 硬重启
+
+            ### 已知限制
+            - 守护进程与刷新率的改动**需要重启设备后生效**
+            - 推测注释仅供参考；人工批中 confidence 为「待实测」的条目
+              标签可能随 iOS 版本变化，以设备实际存在为准
+            - 最低系统版本 iOS 15.6
+
+            ### 安装要求
+            - 必须使用 **TrollStore** 安装；AltStore / Sideloadly / 证书侧载无法授权 root
+            - 分辨率 / 刷新率 / 注销 / 守护进程管理：iOS 15.6 及以上所有可用
+              TrollStore 安装的版本，均不依赖 launchctl
