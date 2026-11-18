@@ -354,7 +354,7 @@ enum RootProc {
     ///   ② 兜底的 `killall -9 launchd` 也无效 —— pid 1 不吃 SIGKILL。
     ///   于是函数"成功"返回，设备纹丝不动。
     ///
-    /// 现在改走已被同作者 SIOriginal 在真机验证过的路径：
+    /// 现在改走已在真机验证过的路径：
     /// 把自身以 root 再起一份，由子进程在 main 里（进 UI 之前）直接调用
     /// `reboot(RB_AUTOBOOT)` —— 这是 iOS 上唯一可靠的重启方式。
     ///

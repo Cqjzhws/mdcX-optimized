@@ -1,3 +1,18 @@
+# mdcX Max v2.4.6
+
+> ## mdcX Boost — 自研终极加速模块（iOS 16.2 / 巨魔）
+>
+> 本仓库新增自研运行时加速引擎 `Boost/`，为 mdcX 增加 UI 响应、动画速度与流畅度、
+> 启动与交互加速、真后台保活与防掉线、系统应用极限加速。全部代码从零编写，
+> 不含任何第三方 tweak 代码；mdcX 原有 25 项文件清零功能保持不变。
+> 加速已做成 mdcX 的一等功能：主界面新增「加速」页 + Performance 加速分类。
+>
+> - 说明文档：`Boost/mdcX-Boost-自研加速说明.md`（模块/参数/风险/回滚/验证检查点）
+> - 本地构建：`cd Boost && python tools/build_boost.py`（产物 `Boost/out/mdcxboost.dylib`）
+> - 部署：TrollStore 装 App → TrollFools 注入 dylib → 「加速」页选档位
+>
+> ---
+
 # iOS File Tweak Tool (PoC)
 
 A simple iOS application that attempts to apply various UI and sound tweaks by zeroing out the first page of specific system files. This project is a Proof of Concept and demonstrates the use of a file-zeroing technique.

@@ -24,6 +24,14 @@ struct RootView: View {
             }
 
             NavigationView {
+                BoostView(logStore: logStore)
+            }
+            .navigationViewStyle(.stack)
+            .tabItem {
+                Label("加速", systemImage: "bolt.fill")
+            }
+
+            NavigationView {
                 ResolutionView(isBusy: $sharedBusy, logStore: logStore)
             }
             .navigationViewStyle(.stack)
@@ -67,7 +75,7 @@ struct RootView: View {
 // 所以「重启设备」的实际做法是：把本 App 以 root 再起一份、带上 TSRebootHelperFlag，
 // 那一份在进 UI 之前（下面这个 main 的最开头）就调 reboot 并把自己结束掉。
 //
-// 时机刻意与 SIOriginal 对齐：main 开头，而不是 __attribute__((constructor))。
+// 时机刻意选在 main 开头，而不是 __attribute__((constructor))。
 // constructor 阶段进程的 persona uid 是否已经生效没有真机验证过，不冒这个险。
 
 @main
