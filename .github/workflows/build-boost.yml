@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: mdcx-build-main
-  cancel-in-progress: true
+  group: mdcx-build-boost
+  cancel-in-progress: false
 
 env:
   # 版本号只在这里写一次，下面全都是引用。
