@@ -531,6 +531,8 @@
 // v2.1.12（F-A）：配置 App 发这个通知，请求 dylib 在当前前台 App 内弹出命中统计浮层。
 // 名字必须与配置 App 侧 NotifyStatsKey 完全一致，否则按钮按了没反应。
 #define kNotifyStats @"com.local.sioriginal.requeststats"
+// v2.5.2：跨 App 统计归因 —— 配置器广播后，每个注入进程把自己的计数器写进共享 plist
+#define kNotifyStatsDump @"com.local.sioriginal.statsdump"
 
 // ---------- 配置 ----------
 // ---------- v2.5.0（P-1）：配置快照 ----------
@@ -612,6 +614,17 @@ static double   gInvLayer    = 1.0 / 5.0;
 // v2.1.11：转场倍率倒数。SIO_transitionDuration 里原本每次做 `d / gTransBoost`，
 // 与 gInvSpeed / gInvLayer 同一套「除法→乘法」范式，只是当年漏了这一处。
 static double   gInvTrans    = 1.0 / 3.0;
+// v2.5.2：分场景倍率（0 = 跟随全局 Speed）。
+// 转场 / 列表 / Web 三个场景可以各给一个**绝对**倍率：设置后该场景不再叠乘
+// 全局 Speed 与分类系数（LayerBoost / TransitionBoost），否则三个倍率相乘后
+// 结果无法预期（40×3×5 已经把动画压到下限）。缺省 0 表示沿用原行为，
+// 配置器不写这三个键时引擎表现与 v2.5.1 完全一致。
+static double   gSpeedTrans = 0.0;
+static double   gSpeedList  = 0.0;
+static double   gSpeedWeb   = 0.0;
+static double   gInvTransS  = 0.0;   // 0 = 该场景未启用独立倍率
+static double   gInvListS   = 0.0;
+static double   gInvWebS    = 0.0;
 static double   gFloorCached = 0.005;
 static BOOL     gBlockedFast = NO;
 static BOOL     gIsWeChat  = NO;
@@ -998,6 +1011,10 @@ static void SIO_recalc(void) {
     gInvSpeed    = (gSpeed > 1.0001) ? (1.0 / gSpeed) : 1.0;
     gInvLayer    = (gLayerBoost > 1.0001) ? (1.0 / gLayerBoost) : 1.0;
     gInvTrans    = (gTransBoost > 1.0001) ? (1.0 / gTransBoost) : 1.0;
+    // v2.5.2：场景倍率倒数额外缓存，热路径不做除法
+    gInvTransS   = (gSpeedTrans > 1.0001) ? (1.0 / gSpeedTrans) : 0.0;
+    gInvListS    = (gSpeedList  > 1.0001) ? (1.0 / gSpeedList)  : 0.0;
+    gInvWebS     = (gSpeedWeb   > 1.0001) ? (1.0 / gSpeedWeb)   : 0.0;
     gBlockedFast = (!gEnabled || gSelfBlacklisted);
 }
 
@@ -1020,6 +1037,10 @@ static void SIO_resetDefaults(void) {
     gLayerBoost    = 5.0;
     gFloorDuration = 0.005;
     gTransBoost    = 3.0;
+    // v2.5.2：场景倍率出厂为「跟随全局」
+    gSpeedTrans    = 0.0;
+    gSpeedList     = 0.0;
+    gSpeedWeb      = 0.0;
     gInAppNotify   = YES;
     gInstantTransition = YES;
     gHUDFast       = YES;
@@ -1216,6 +1237,13 @@ static void SIO_reload(void) {
     gFloorDuration = (fd >= 0.005 && fd <= 0.1) ? fd : 0.005;
     double tb = d[@"TransitionBoost"] ? [d[@"TransitionBoost"] doubleValue] : 3.0;
     gTransBoost = (tb >= 1.0 && tb <= 3.0) ? tb : 3.0;
+    // v2.5.2：分场景绝对倍率。合法值 0（跟随全局）或 1–50，其余一律视为未设置。
+    double st = d[@"SpeedTransition"] ? [d[@"SpeedTransition"] doubleValue] : 0.0;
+    gSpeedTrans = (st >= 1.0 && st <= 50.0) ? st : 0.0;
+    double sl2 = d[@"SpeedList"] ? [d[@"SpeedList"] doubleValue] : 0.0;
+    gSpeedList = (sl2 >= 1.0 && sl2 <= 50.0) ? sl2 : 0.0;
+    double sw = d[@"SpeedWeb"] ? [d[@"SpeedWeb"] doubleValue] : 0.0;
+    gSpeedWeb = (sw >= 1.0 && sw <= 50.0) ? sw : 0.0;
     // 长按加速（缺键关，v2.1.1 回退）与长按时长（0.20–0.40，缺键 0.30）
     // v2.1.7：长按加速连同其 hook 一起移除（init 族方法挂钩必崩，见安装处注释）
 
@@ -2414,6 +2442,13 @@ static inline double SIO_transitionDuration(void) {
     // v2.3.3（审查 P0）：原来硬编码 return 0.001，绕过了 FloorDuration 下限。
     // 转场是最容易出完成回调配对故障的路径，必须受下限保护，与滚动瞬切分支一致。
     if (gEnabled && gMode != 1 && gInstantTransition) return SIO_floor();
+    // v2.5.2：场景倍率优先。SpeedTransition 是绝对倍率，直接作用于系统基准 0.35s，
+    // 不再叠乘全局 Speed 与 TransitionBoost —— 三者相乘会让结果无法预期。
+    if (gEnabled && gMode != 1 && gInvTransS > 0.0) {
+        double d = 0.35 * gInvTransS;
+        double fl = SIO_floor();
+        return (d < fl) ? fl : d;
+    }
     double d = SIO_targetDuration(0.35);
     if (gEnabled && gMode != 1 && gTransBoost > 1.0001 && d > 0.0) {
         d = d * gInvTrans;   // v2.1.11：除法→乘法，与 gInvSpeed / gInvLayer 同一套
@@ -2543,7 +2578,16 @@ static BOOL SIO_listOK(void) { return gListAccel && !SIO_blocked(); }
 static void SIO_listWrap(void (^block)(void)) {
     [CATransaction begin];
     @try {
-        SIO_setTransactionDuration(SIO_targetDuration(0.25));
+        double d;
+        if (gEnabled && gMode != 1 && gInvListS > 0.0) {
+            // v2.5.2：列表场景独立绝对倍率，替代「全局 × LayerBoost」的叠乘
+            d = 0.25 * gInvListS;
+            double fl = SIO_floor();
+            if (d < fl) d = fl;
+        } else {
+            d = SIO_targetDuration(0.25);
+        }
+        SIO_setTransactionDuration(d);
         block();
     } @finally { [CATransaction commit]; }
 }
@@ -2785,7 +2829,14 @@ static void sio_WKdeferHide(id wv, int attempt) {
     objc_setAssociatedObject(wv, kSIOWKHidePending,
                              (__bridge id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
     __weak id wself = wv;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+    // v2.5.2：Web 场景倍率作用于「首帧轮询间隔」。缺省 0.25s（与旧行为一致）；
+    // 设置 SpeedWeb 后按同一倍率缩短，最小 0.02s —— 再短就不是轮询而是忙等了。
+    double poll = 0.25;
+    if (gEnabled && gMode != 1 && gInvWebS > 0.0) {
+        poll = 0.25 * gInvWebS;
+        if (poll < 0.02) poll = 0.02;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(poll * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         id s = wself;
         if (!s || !o_WKsetHidden) return;
@@ -2849,6 +2900,46 @@ static void sio_MBHUDHide(id self, SEL _cmd, BOOL animated) {
 
 #pragma mark - 安装
 
+// v2.5.2：跨 App 统计归因。
+// 每个注入进程只看得到自己的计数器，所以「按 bundleID 归因」必须由各进程把快照
+// 写进同一个共享 plist，再由配置器汇总。落盘目录与配置同源
+// （/var/Managed Preferences/mobile），不额外申请权限；原子写避免读方拿到半份文件。
+static NSString * const kSIOStatsFile =
+    @"/var/Managed Preferences/mobile/com.local.sioriginal.stats.plist";
+
+static void SIO_dumpStatsSnapshot(void) {
+    @autoreleasepool {
+        NSString *bid = gSelfBundle.length ? gSelfBundle : @"unknown";
+        NSMutableDictionary *hits = [NSMutableDictionary dictionary];
+        for (int i = 0; i < SIO_HIT__COUNT; i++) {
+            hits[@(kSIOHitNames[i])] =
+                @(atomic_load_explicit(&gHitCounts[i], memory_order_relaxed));
+        }
+        NSMutableDictionary *row = [NSMutableDictionary dictionary];
+        row[@"updatedAt"] = @([[NSDate date] timeIntervalSince1970]);
+        row[@"enabled"]   = @(gEnabled ? 1 : 0);
+        row[@"mode"]      = @(gMode);
+        row[@"speed"]     = @(gSpeed);
+        row[@"safeMode"]  = @(gSafeMode ? 1 : 0);
+        row[@"hits"]      = hits;
+
+        NSMutableDictionary *all =
+            [NSMutableDictionary dictionaryWithContentsOfFile:kSIOStatsFile];
+        if (!all) all = [NSMutableDictionary dictionary];
+        all[bid] = row;
+        if (![all writeToFile:kSIOStatsFile atomically:YES]) {
+            NSLog(@"[SIOriginal] stats dump failed: %@", kSIOStatsFile);
+        }
+    }
+}
+
+static void SIO_onStatsDump(CFNotificationCenterRef center, void *observer,
+                            CFNotificationName name, const void *object,
+                            CFDictionaryRef userInfo) {
+    (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
+    SIO_dumpStatsSnapshot();
+}
+
 __attribute__((constructor))
 static void SIOriginalInit(void) {
     // v1.8.12：安装全程 @try 包裹。任何一步异常只丢功能，绝不影响目标 App 启动（红线规则 #2）。
@@ -2874,6 +2965,11 @@ static void SIOriginalInit(void) {
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
                                     SIO_onStatsRequest,
                                     (__bridge CFStringRef)kNotifyStats, NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    // v2.5.2：请求把本进程计数写进共享 plist（配置器汇总用）
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+                                    SIO_onStatsDump,
+                                    (__bridge CFStringRef)kNotifyStatsDump, NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
     // v2.1.15：常驻后台的 App 收到请求时不是 Active，浮层会被 active 检查挡掉。
     // 这里挂一个回到前台的观察者，把挂起的请求补弹出来。令牌必须持有，
