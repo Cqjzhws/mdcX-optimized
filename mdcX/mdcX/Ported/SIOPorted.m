@@ -3665,6 +3665,10 @@ static BOOL SIOColorIsRed(UIColor *c) {
 // 不用 UITabBarController 的原因：系统标签栏在 iOS 26 上仍是不透明材质条，
 // 且会占掉安全区，做不到「内容从毛玻璃下面透过去」。
 @interface SIORootVC : UIViewController
+/// 移植版修复（2.4.6-port）：原 App 由 SIOAppDelegate 的 strong 属性持有 model；
+/// 移植后没有 AppDelegate，model 必须由 root VC 持有，否则工厂函数返回后即被释放，
+/// 四个页面的 weak model 全变 nil（表现为「保存」必失败、自检报告空白）。
+@property (nonatomic, strong) SIOModel *model;
 @property (nonatomic, strong) NSArray<UINavigationController *> *navs;
 @property (nonatomic, strong) NSArray<SIOTabItem *> *items;
 @property (nonatomic, strong) SIOGlassView *bar;
@@ -3858,6 +3862,7 @@ static BOOL SIOColorIsRed(UIColor *c) {
     };
 
     SIORootVC *root = [[SIORootVC alloc] initWithNavs:@[ nav(e), nav(f), nav(s), nav(a) ]];
+    root.model = model;   // 移植版：别让 model 随局部变量一起释放
 
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.rootViewController = root;
@@ -3940,6 +3945,7 @@ UIViewController *MXCreateJisuRootVC(void) {
     };
 
     SIORootVC *root = [[SIORootVC alloc] initWithNavs:@[ nav(e), nav(f), nav(s), nav(a) ]];
+    root.model = model;   // 移植版：别让 model 随局部变量一起释放
 
     if (gMigratedDirty) {
         dispatch_async(dispatch_get_main_queue(), ^{
