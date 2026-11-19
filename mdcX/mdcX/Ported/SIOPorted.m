@@ -42,6 +42,10 @@ static NSString * const NotifyKey = @"com.local.sioriginal.settingschanged";
 // v2.1.12（F-A）：请求前台 App 弹出 hook 命中统计浮层。
 // 必须与 dylib 侧 kNotifyStats 完全一致，否则按钮按了没反应。
 static NSString * const NotifyStatsKey = @"com.local.sioriginal.requeststats";
+// v2.5.2：跨 App 统计 —— 广播后各注入进程把自己的计数器写进共享 plist
+static NSString * const NotifyStatsDumpKey = @"com.local.sioriginal.statsdump";
+static NSString * const SIOStatsDumpPath =
+    @"/var/Managed Preferences/mobile/com.local.sioriginal.stats.plist";
 static NSString * const kAppliedNote = @"SIOModelDidApply";
 static NSString * const SIO_VERSION = @"v2.4.6";
 
@@ -202,6 +206,10 @@ static NSMutableDictionary *ReadConfig(void) {
     if (!d[@"LayerBoost"]) d[@"LayerBoost"] = @(SIO_DefLayerBoost);  // 显式动画再 ×5（原 ×3，与 dylib 对齐）
     if (!d[@"FloorDuration"])    d[@"FloorDuration"]    = @(SIO_DefFloor);  // 0.005s（原 0.01，与 dylib 对齐）
     if (!d[@"TransitionBoost"])  d[@"TransitionBoost"]  = @(SIO_DefTransBoost);  // 转场再 ×3（原 ×2，与 dylib 对齐）
+    // v2.5.2：分场景倍率。0 = 跟随全局，缺键补 0 保持旧行为
+    if (!d[@"SpeedTransition"])  d[@"SpeedTransition"]  = @0;
+    if (!d[@"SpeedList"])        d[@"SpeedList"]        = @0;
+    if (!d[@"SpeedWeb"])         d[@"SpeedWeb"]         = @0;
     // v2.1.2：FastLongPress / LongPressDuration 已随长按 hook 一并移除
     if (!d[@"InAppNotify"])      d[@"InAppNotify"]      = @YES;
     // v2.1.9：瞬时打开三件套 —— 与 dylib 侧默认值保持一致（缺键 = 开）
@@ -233,6 +241,8 @@ static NSArray *SIOConfigKeys(void) {
                   @"Spring", @"Extra", @"ListAccel", @"Blacklist", @"ZoomAccel",
                   @"FastScroll", @"FastTap", @"LayerBoost",
                   @"FloorDuration", @"TransitionBoost",
+                  // v2.5.2：分场景倍率（不登记白名单就写不进 plist）
+                  @"SpeedTransition", @"SpeedList", @"SpeedWeb",
                   @"InAppNotify",
                   // v2.1.9：瞬时打开三件套（新键登记白名单才能被写入 plist）
                   @"InstantTransition", @"HUDFast", @"WKFastShow",
@@ -295,6 +305,7 @@ static NSArray *SIOSnapshotKeys(void) {
         k = @[ @"Enabled", @"Mode", @"Speed", @"SlowFactor", @"Spring", @"Extra",
                @"ListAccel", @"ZoomAccel", @"FastScroll", @"FastTap",
                @"LayerBoost", @"FloorDuration", @"TransitionBoost",
+               @"SpeedTransition", @"SpeedList", @"SpeedWeb",
                @"InAppNotify", @"InstantTransition", @"HUDFast", @"WKFastShow", @"HUDDelay" ];
     });
     return k;
@@ -465,6 +476,18 @@ static int LayerIndexForBoost(double b) {
     if (b > 4.0 && b < 7.0)  return 3;
     if (b >= 7.0)            return 4;
     return 0;
+}
+// v2.5.2：分场景绝对倍率。0 档 = 跟随全局 Speed；其余档位与引擎接受范围（1–50）对齐。
+static double SceneSpeedForIndex(int i) {
+    static const double t[] = { 0.0, 8.0, 16.0, 24.0, 40.0 };
+    return (i >= 0 && i <= 4) ? t[i] : 0.0;
+}
+static int SceneSpeedIndex(double v) {
+    if (v < 1.0)  return 0;
+    if (v < 12.0) return 1;
+    if (v < 20.0) return 2;
+    if (v < 32.0) return 3;
+    return 4;
 }
 // 慢放倍率：×2 / ×3 / ×5 / ×10
 static double SlowFactorForIndex(int i) {
@@ -1266,6 +1289,10 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
 @property (strong) UILabel *lblLayer;
 @property (strong) UISegmentedControl *segTrans;
 @property (strong) UILabel *lblTrans;
+// v2.5.2：分场景倍率（转场 / 列表 / Web），第 0 档 = 跟随全局
+@property (strong) UISegmentedControl *segSpeedTrans;
+@property (strong) UISegmentedControl *segSpeedList;
+@property (strong) UISegmentedControl *segSpeedWeb;
 @property (strong) UISwitch *swSpring, *swExtra;
 // 手感页
 @property (strong) UISwitch *swList, *swZoom, *swFastScroll, *swFastTap;
@@ -1350,6 +1377,13 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
     self.segFloor.selectedSegmentIndex = FloorIndexFor([c[@"FloorDuration"] doubleValue]);
     self.segLayer.selectedSegmentIndex = LayerIndexForBoost([c[@"LayerBoost"] doubleValue]);
     self.segTrans.selectedSegmentIndex = TransIndexFor([c[@"TransitionBoost"] doubleValue]);
+    // v2.5.2：分场景倍率回显
+    self.segSpeedTrans.selectedSegmentIndex =
+        SceneSpeedIndex(c[@"SpeedTransition"] ? [c[@"SpeedTransition"] doubleValue] : 0.0);
+    self.segSpeedList.selectedSegmentIndex =
+        SceneSpeedIndex(c[@"SpeedList"] ? [c[@"SpeedList"] doubleValue] : 0.0);
+    self.segSpeedWeb.selectedSegmentIndex =
+        SceneSpeedIndex(c[@"SpeedWeb"] ? [c[@"SpeedWeb"] doubleValue] : 0.0);
     self.swSpring.on = [c[@"Spring"] boolValue];
     self.swExtra.on = [c[@"Extra"] boolValue];
 
@@ -1556,6 +1590,10 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
     cfg[@"LayerBoost"] = @(LayerBoostForIndex((int)self.segLayer.selectedSegmentIndex));
     cfg[@"FloorDuration"] = @(FloorForIndex((int)self.segFloor.selectedSegmentIndex));
     cfg[@"TransitionBoost"] = @(TransForIndex((int)self.segTrans.selectedSegmentIndex));
+    // v2.5.2：分场景倍率（0 = 跟随全局）
+    cfg[@"SpeedTransition"] = @(SceneSpeedForIndex((int)self.segSpeedTrans.selectedSegmentIndex));
+    cfg[@"SpeedList"]       = @(SceneSpeedForIndex((int)self.segSpeedList.selectedSegmentIndex));
+    cfg[@"SpeedWeb"]        = @(SceneSpeedForIndex((int)self.segSpeedWeb.selectedSegmentIndex));
     cfg[@"InAppNotify"] = @(self.swNotify.on);
     // v2.1.9：瞬时打开三件套写盘 —— 不写的话这三个键缺失，dylib 依旧默认全开，关不掉
     cfg[@"InstantTransition"] = @(self.swInstant.on);
@@ -1828,6 +1866,16 @@ static void SIOCheckRange(NSMutableArray *problems, NSDictionary *d, NSString *k
     SIOCheckRange(problems, cfg, @"FloorDuration",   0.005, 0.1,  YES, @"");
     SIOCheckRange(problems, cfg, @"LayerBoost",      1.0,   10.0, YES, @"");
     SIOCheckRange(problems, cfg, @"TransitionBoost", 1.0,   3.0,  YES, @"");
+    // v2.5.2：0 表示跟随全局；非零时必须在 1–50（与 dylib 的接受范围一致）
+    // SIOCheckRange 不支持「0 或区间」这种稀疏合法域，这里单独校验。
+    for (NSString *sk in @[ @"SpeedTransition", @"SpeedList", @"SpeedWeb" ]) {
+        NSNumber *sv = cfg[sk];
+        if (![sv isKindOfClass:[NSNumber class]]) continue;
+        double v = [sv doubleValue];
+        if (v > 0.0 && (v < 1.0 || v > 50.0)) {
+            [problems addObject:[NSString stringWithFormat:@"%@=%.1f 超出范围（0 或 1–50）", sk, v]];
+        }
+    }
     SIOCheckRange(problems, cfg, @"HUDDelay",        0.02,  1.0,  YES, @"");
     id mv = cfg[@"Mode"];
     if (mv && (![mv isKindOfClass:[NSNumber class]] || [mv intValue] < 0 || [mv intValue] > 2))
@@ -2634,6 +2682,22 @@ static BOOL SIOColorIsRed(UIColor *c) {
         tt, m.segTrans, m.lblTrans,
     ], 10)];
 
+    // v2.5.2：分场景倍率。第 0 档「跟随」= 沿用全局 Speed，与升级前的行为完全一致。
+    UILabel *sc = SIOLabel(@"分场景倍率", 16, SIOTextPri());
+    m.segSpeedTrans = [[UISegmentedControl alloc] initWithItems:@[ @"跟随", @"×8", @"×16", @"×24", @"×40" ]];
+    m.segSpeedList  = [[UISegmentedControl alloc] initWithItems:@[ @"跟随", @"×8", @"×16", @"×24", @"×40" ]];
+    m.segSpeedWeb   = [[UISegmentedControl alloc] initWithItems:@[ @"跟随", @"×8", @"×16", @"×24", @"×40" ]];
+    for (UISegmentedControl *s in @[ m.segSpeedTrans, m.segSpeedList, m.segSpeedWeb ]) {
+        [s addTarget:self action:@selector(changed) forControlEvents:UIControlEventValueChanged];
+        s.selectedSegmentIndex = 0;
+    }
+    [self.stack addArrangedSubview:SIOCard(@[
+        sc,
+        SIOLabel(@"转场（导航 / 模态 / Tab）", 13, SIOTextSec()), m.segSpeedTrans,
+        SIOLabel(@"列表（TV / CV 增删改）", 13, SIOTextSec()), m.segSpeedList,
+        SIOLabel(@"Web（WKWebView 首帧）", 13, SIOTextSec()), m.segSpeedWeb,
+    ], 10)];
+
     // 弹簧 / 转场开关
     m.swSpring = [[UISwitch alloc] init];
     m.swExtra = [[UISwitch alloc] init];
@@ -2992,6 +3056,8 @@ static BOOL SIOColorIsRed(UIColor *c) {
 @property (strong) UIButton  *clonePill;   // v2.4.0：克隆按钮点击反馈同款
 // v2.1.12（F-A）：请求目标 App 上报 hook 命中统计
 - (void)doRequestStats;
+// v2.5.2：跨 App 汇总统计
+- (void)doDumpStats;
 @end
 @implementation SIOAdvancedVC
 
@@ -3177,6 +3243,14 @@ static BOOL SIOColorIsRed(UIColor *c) {
         12, SIOTextSec());
     hsNote.numberOfLines = 0;
     [self.stack addArrangedSubview:SIOCard(@[ hs, hsNote ], 10)];
+
+    // v2.5.2：跨 App 汇总。浮层只能看当前前台那一个进程，这个按钮把各 App 的快照
+    // 汇总到一张表里（按 bundleID 归因），排障时不用逐个 App 切过去看。
+    UIButton *dumpBtn = SIOPill(@"汇总统计（跨 App）", [UIColor whiteColor],
+                                [UIColor systemGreenColor]);
+    [dumpBtn addTarget:self action:@selector(doDumpStats)
+      forControlEvents:UIControlEventTouchUpInside];
+    [self.stack addArrangedSubview:SIOCard(@[ dumpBtn ], 10)];
 
     // ---- v2.2.0：安全与自愈 ----
     [self.stack addArrangedSubview:SIOSectionTitle(@"安全与自愈")];
@@ -3440,6 +3514,52 @@ static BOOL SIOColorIsRed(UIColor *c) {
     [self presentViewController:a animated:YES completion:nil];
 }
 
+// v2.5.2：请求各注入进程上报，汇总展示。Darwin 通知是全系统广播，
+// 只有注册了该通知的进程（即注入了 v2.5.2+ 引擎的 App）会响应。
+- (void)doDumpStats {
+    CFNotificationCenterPostNotification(
+        CFNotificationCenterGetDarwinNotifyCenter(),
+        (__bridge CFStringRef)NotifyStatsDumpKey, NULL, NULL, YES);
+    UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc]
+        initWithStyle:UIImpactFeedbackStyleLight];
+    [fb impactOccurred];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSMutableString *s = [NSMutableString string];
+        NSDictionary *all = [NSDictionary dictionaryWithContentsOfFile:SIOStatsDumpPath];
+        if (![all isKindOfClass:[NSDictionary class]] || all.count == 0) {
+            [s appendString:@"没有收到任何进程上报。\n\n"
+                         @"请确认目标 App 已注入 v2.5.2 及以上引擎，"
+                         @"并且最近运行过（快照在进程存活时才会写）。"];
+        } else {
+            NSArray *bids = [all.allKeys sortedArrayUsingSelector:@selector(compare:)];
+            for (NSString *b in bids) {
+                NSDictionary *row = all[b];
+                if (![row isKindOfClass:[NSDictionary class]]) continue;
+                [s appendFormat:@"● %@\n  模式=%d 倍率=%.1f 安全模式=%d\n",
+                 b, [row[@"mode"] intValue], [row[@"speed"] doubleValue],
+                 [row[@"safeMode"] intValue]];
+                NSDictionary *hits = row[@"hits"];
+                if ([hits isKindOfClass:[NSDictionary class]] && hits.count) {
+                    NSMutableArray *parts = [NSMutableArray array];
+                    for (NSString *k in [hits.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+                        int v = [hits[k] intValue];
+                        if (v > 0) [parts addObject:[NSString stringWithFormat:@"%@=%d", k, v]];
+                    }
+                    [s appendFormat:@"  %@\n",
+                     parts.count ? [parts componentsJoinedByString:@" "] : @"（全部为 0）"];
+                }
+            }
+        }
+        UIAlertController *a = [UIAlertController
+            alertControllerWithTitle:@"跨 App 命中统计"
+            message:s preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"好"
+                                             style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+    });
+}
+
 - (void)doCheck {
 // v2.1.9：点击反馈 —— 震动 + 按钮标题短暂变化 + 报告含检测时间，肉眼可见「真的重新检测了」
     self.reportView.text = [self.model checkReport];
@@ -3665,10 +3785,6 @@ static BOOL SIOColorIsRed(UIColor *c) {
 // 不用 UITabBarController 的原因：系统标签栏在 iOS 26 上仍是不透明材质条，
 // 且会占掉安全区，做不到「内容从毛玻璃下面透过去」。
 @interface SIORootVC : UIViewController
-/// 移植版修复（2.4.6-port）：原 App 由 SIOAppDelegate 的 strong 属性持有 model；
-/// 移植后没有 AppDelegate，model 必须由 root VC 持有，否则工厂函数返回后即被释放，
-/// 四个页面的 weak model 全变 nil（表现为「保存」必失败、自检报告空白）。
-@property (nonatomic, strong) SIOModel *model;
 @property (nonatomic, strong) NSArray<UINavigationController *> *navs;
 @property (nonatomic, strong) NSArray<SIOTabItem *> *items;
 @property (nonatomic, strong) SIOGlassView *bar;
@@ -3862,7 +3978,6 @@ static BOOL SIOColorIsRed(UIColor *c) {
     };
 
     SIORootVC *root = [[SIORootVC alloc] initWithNavs:@[ nav(e), nav(f), nav(s), nav(a) ]];
-    root.model = model;   // 移植版：别让 model 随局部变量一起释放
 
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.window.rootViewController = root;
@@ -3945,7 +4060,6 @@ UIViewController *MXCreateJisuRootVC(void) {
     };
 
     SIORootVC *root = [[SIORootVC alloc] initWithNavs:@[ nav(e), nav(f), nav(s), nav(a) ]];
-    root.model = model;   // 移植版：别让 model 随局部变量一起释放
 
     if (gMigratedDirty) {
         dispatch_async(dispatch_get_main_queue(), ^{
