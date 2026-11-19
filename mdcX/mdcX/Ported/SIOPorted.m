@@ -117,6 +117,11 @@ static void SIOFixPermissionsAsRoot(void) {
     SpawnRoot(selfPath, @[ @"--sio-fixperm" ]);
 }
 
+// v2.5.3：保存失败时把真实 errno/路径带到提示里。原来不管哪种失败都显示
+// 「请确认 TrollStore 权限正常」，排障时等于没有信息（errno 才是能定位问题的那个）。
+static int      gLastWriteErrno = 0;
+static NSString *gLastWritePath = nil;
+
 // 原子写失败先降级直写。最常见失败场景是「目录属主是 root、文件属主是 mobile」：
 // 原子写要在同目录新建临时文件 → EACCES；直写只覆盖已有文件内容即可成功。
 static BOOL SIOWritePlist(NSDictionary *d, NSString *path) {
@@ -126,6 +131,8 @@ static BOOL SIOWritePlist(NSDictionary *d, NSString *path) {
         NSLog(@"[SIO] atomic write failed (errno=%d), direct write ok: %@", e1, path);
         return YES;
     }
+    gLastWriteErrno = errno;
+    gLastWritePath  = path;
     NSLog(@"[SIO] write failed: %@ (atomic=%d direct=%d)", path, e1, errno);
     return NO;
 }
@@ -2622,7 +2629,12 @@ static BOOL SIOColorIsRed(UIColor *c) {
             alertControllerWithTitle:blocked ? @"⚠️ 配置校验未通过" : @"❌ 保存失败"
             message:blocked
                 ? [NSString stringWithFormat:@"已阻止落盘，请修正以下问题：\n%@", self.model.lastValidationError]
-                : @"无法写入 com.apple.UIKit.plist，请确认 TrollStore 权限正常。"
+                : [NSString stringWithFormat:
+                   @"无法写入 %@（errno=%d，%s）。\n\n"
+                    "已尝试：原子写 → 直接写 → 以 root 修复属主后重试。\n"
+                    "若持续失败，多半是该文件或目录属主为 root 且 root 修复也未生效，"
+                    "请把这条信息发我。",
+                   gLastWritePath ?: PrefPath, gLastWriteErrno, strerror(gLastWriteErrno)]
             preferredStyle:UIAlertControllerStyleAlert];
         [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
