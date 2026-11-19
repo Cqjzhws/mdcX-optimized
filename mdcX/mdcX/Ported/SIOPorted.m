@@ -14,6 +14,7 @@
 #import <sys/stat.h>
 #import <signal.h>
 #import <unistd.h>
+#import <fcntl.h>     // v2.5.4：直写兜底用 open/write，才能拿到真实 errno
 #import <stdlib.h>
 #import <string.h>
 #include <math.h>      // v2.1.20：SIOFontCapped / Speed 取整用 round()
@@ -121,20 +122,54 @@ static void SIOFixPermissionsAsRoot(void) {
 // 「请确认 TrollStore 权限正常」，排障时等于没有信息（errno 才是能定位问题的那个）。
 static int      gLastWriteErrno = 0;
 static NSString *gLastWritePath = nil;
+static NSString *gLastWriteReason = nil;
 
-// 原子写失败先降级直写。最常见失败场景是「目录属主是 root、文件属主是 mobile」：
-// 原子写要在同目录新建临时文件 → EACCES；直写只覆盖已有文件内容即可成功。
+// v2.5.4：之前的实现靠 errno 判断，但 Foundation 的 writeToFile 失败时**不保证设置 errno**
+// （真机回报 errno=0 / Undefined error: 0，等于什么都没告诉我们）。改成：
+//   ① 先做 plist 序列化，失败直接报「哪个键不是 plist 类型」；
+//   ② 原子写失败后走 POSIX open/write，fd/write 的 errno 才是可信的；
+//   ③ 两条都失败时把真实原因带进弹窗。
 static BOOL SIOWritePlist(NSDictionary *d, NSString *path) {
-    if ([d writeToFile:path atomically:YES]) return YES;
-    int e1 = errno;
-    if ([d writeToFile:path atomically:NO]) {
-        NSLog(@"[SIO] atomic write failed (errno=%d), direct write ok: %@", e1, path);
-        return YES;
+    gLastWriteErrno = 0; gLastWritePath = path; gLastWriteReason = nil;
+
+    NSError *err = nil;
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:d
+                     format:NSPropertyListXMLFormat_v1_0 options:0 error:&err];
+    if (!data) {
+        gLastWriteReason = [NSString stringWithFormat:@"plist 序列化失败：%@",
+                            err.localizedDescription ?: @"含非 plist 类型"];
+        NSLog(@"[SIO] serialize failed: %@ -> %@", path, gLastWriteReason);
+        return NO;
     }
-    gLastWriteErrno = errno;
-    gLastWritePath  = path;
-    NSLog(@"[SIO] write failed: %@ (atomic=%d direct=%d)", path, e1, errno);
-    return NO;
+    if ([data writeToFile:path options:NSDataWritingAtomic error:&err]) return YES;
+    NSString *atomicErr = err.localizedDescription ?: @"unknown";
+
+    // 直写：只覆盖已有文件内容，不需要在目录里建临时文件
+    int fd = open(path.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        gLastWriteErrno = errno;
+        gLastWriteReason = [NSString stringWithFormat:@"open 失败：%s（原子写报：%@）",
+                            strerror(errno), atomicErr];
+        NSLog(@"[SIO] open failed: %@ -> %@", path, gLastWriteReason);
+        return NO;
+    }
+    const uint8_t *bytes = data.bytes;
+    size_t total = data.length, off = 0;
+    while (off < total) {
+        ssize_t n = write(fd, bytes + off, total - off);
+        if (n <= 0) {
+            gLastWriteErrno = errno;
+            gLastWriteReason = [NSString stringWithFormat:@"write 失败：%s", strerror(errno)];
+            close(fd);
+            NSLog(@"[SIO] write failed: %@ -> %@", path, gLastWriteReason);
+            return NO;
+        }
+        off += (size_t)n;
+    }
+    fsync(fd);
+    close(fd);
+    NSLog(@"[SIO] atomic write failed (%@), direct POSIX write ok: %@", atomicErr, path);
+    return YES;
 }
 
 // 以 root persona 自旋的辅助进程入口。必须在 UIApplicationMain 之前完成并退出，
@@ -526,7 +561,7 @@ static double SceneSpeedForIndex(int i) {
     return (i >= 0 && i <= 4) ? t[i] : 0.0;
 }
 static int SceneSpeedIndex(double v) {
-    if (v < 1.0)  return 0;
+    if (!(v >= 1.0)) return 0;   // v2.5.4：NaN/负数/0 都归到「跟随」，NaN 否则会落到 4
     if (v < 12.0) return 1;
     if (v < 20.0) return 2;
     if (v < 32.0) return 3;
@@ -1336,6 +1371,8 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
 @property (strong) UISegmentedControl *segSpeedTrans;
 @property (strong) UISegmentedControl *segSpeedList;
 @property (strong) UISegmentedControl *segSpeedWeb;
+// v2.5.4：三行下面的当前值标签 —— 分段控件的选中态在玻璃卡片里容易被误读，直接写出数值
+@property (strong) UILabel *lblSpeedTrans, *lblSpeedList, *lblSpeedWeb;
 @property (strong) UISwitch *swSpring, *swExtra;
 // 手感页
 @property (strong) UISwitch *swList, *swZoom, *swFastScroll, *swFastTap;
@@ -1427,6 +1464,14 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
         SceneSpeedIndex(c[@"SpeedList"] ? [c[@"SpeedList"] doubleValue] : 0.0);
     self.segSpeedWeb.selectedSegmentIndex =
         SceneSpeedIndex(c[@"SpeedWeb"] ? [c[@"SpeedWeb"] doubleValue] : 0.0);
+    // v2.5.4：把回显结果直接写成文字，避免「分段控件到底选了哪一档」的视觉误读
+    NSArray *sceneNames = @[ @"跟随全局", @"×8", @"×16", @"×24", @"×40" ];
+    self.lblSpeedTrans.text = [NSString stringWithFormat:@"当前：%@",
+        sceneNames[MAX(0, MIN(4, (int)self.segSpeedTrans.selectedSegmentIndex))]];
+    self.lblSpeedList.text  = [NSString stringWithFormat:@"当前：%@",
+        sceneNames[MAX(0, MIN(4, (int)self.segSpeedList.selectedSegmentIndex))]];
+    self.lblSpeedWeb.text   = [NSString stringWithFormat:@"当前：%@",
+        sceneNames[MAX(0, MIN(4, (int)self.segSpeedWeb.selectedSegmentIndex))]];
     self.swSpring.on = [c[@"Spring"] boolValue];
     self.swExtra.on = [c[@"Extra"] boolValue];
 
@@ -2630,11 +2675,10 @@ static BOOL SIOColorIsRed(UIColor *c) {
             message:blocked
                 ? [NSString stringWithFormat:@"已阻止落盘，请修正以下问题：\n%@", self.model.lastValidationError]
                 : [NSString stringWithFormat:
-                   @"无法写入 %@（errno=%d，%s）。\n\n"
-                    "已尝试：原子写 → 直接写 → 以 root 修复属主后重试。\n"
-                    "若持续失败，多半是该文件或目录属主为 root 且 root 修复也未生效，"
-                    "请把这条信息发我。",
-                   gLastWritePath ?: PrefPath, gLastWriteErrno, strerror(gLastWriteErrno)]
+                   @"无法写入 %@\n\n已尝试：序列化 → 原子写 → 直接写 → 以 root 修属主后重试。\n"
+                    "失败原因：%@\n\n请把这段信息发我。",
+                   gLastWritePath ?: PrefPath,
+                   gLastWriteReason ?: @"未知（写入接口未返回错误）"]
             preferredStyle:UIAlertControllerStyleAlert];
         [a addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
@@ -2739,13 +2783,15 @@ static BOOL SIOColorIsRed(UIColor *c) {
         [s addTarget:self action:@selector(changed) forControlEvents:UIControlEventValueChanged];
         s.selectedSegmentIndex = 0;
     }
+    m.lblSpeedTrans = SIOLabel(@"", 12, SIOTextSec());
+    m.lblSpeedList  = SIOLabel(@"", 12, SIOTextSec());
+    m.lblSpeedWeb   = SIOLabel(@"", 12, SIOTextSec());
     [self.stack addArrangedSubview:SIOCard(@[
         sc,
-        SIOLabel(@"转场（导航 / 模态 / Tab）", 13, SIOTextSec()), m.segSpeedTrans,
-        SIOLabel(@"列表（TV / CV 增删改）", 13, SIOTextSec()), m.segSpeedList,
-        SIOLabel(@"Web（WKWebView 首帧）", 13, SIOTextSec()), m.segSpeedWeb,
+        SIOLabel(@"转场（导航 / 模态 / Tab）", 13, SIOTextSec()), m.segSpeedTrans, m.lblSpeedTrans,
+        SIOLabel(@"列表（TV / CV 增删改）", 13, SIOTextSec()), m.segSpeedList, m.lblSpeedList,
+        SIOLabel(@"Web（WKWebView 首帧）", 13, SIOTextSec()), m.segSpeedWeb, m.lblSpeedWeb,
     ], 10)];
-
     // 弹簧 / 转场开关
     m.swSpring = [[UISwitch alloc] init];
     m.swExtra = [[UISwitch alloc] init];
