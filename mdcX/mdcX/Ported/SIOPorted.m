@@ -3917,6 +3917,11 @@ static BOOL SIOColorIsRed(UIColor *c) {
 @property (nonatomic, strong) NSArray<SIOTabItem *> *items;
 @property (nonatomic, strong) SIOGlassView *bar;
 @property (nonatomic, assign) NSInteger selectedIndex;
+// v2.5.6：移植时没有 SIOAppDelegate，model 原先是工厂里的局部变量，
+// 四个页面对它只有 weak 引用（SIOPageVC.model）—— 工厂一返回就被释放，
+// 页面的 self.model 全变 nil：[nil save] 弹「保存失败」、[nil checkReport] 让自检区空白。
+// 由根控制器强持有，生命周期才与原版一致。
+@property (nonatomic, strong) SIOModel *model;
 - (instancetype)initWithNavs:(NSArray<UINavigationController *> *)navs;
 @end
 
@@ -4188,6 +4193,9 @@ UIViewController *MXCreateJisuRootVC(void) {
     };
 
     SIORootVC *root = [[SIORootVC alloc] initWithNavs:@[ nav(e), nav(f), nav(s), nav(a) ]];
+    // v2.5.6：必须在这里强持有。四个页面只有 weak 引用，少了这一行 model 会在本函数
+    // 返回时立刻释放，保存与自检全部走 nil 分支（弹窗「保存失败」、自检区空白）。
+    root.model = model;
 
     if (gMigratedDirty) {
         dispatch_async(dispatch_get_main_queue(), ^{
