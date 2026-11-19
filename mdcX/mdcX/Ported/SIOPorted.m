@@ -2389,7 +2389,10 @@ static void SIOCheckRange(NSMutableArray *problems, NSDictionary *d, NSString *k
 #pragma mark - 页面基类
 
 @interface SIOPageVC : UIViewController <UITextViewDelegate>
-@property (weak) SIOModel *model;
+// v2.5.7：页面强持有模型。weak 依赖「根控制器一定活着」这个前提，而 Swift 外壳
+// 重建/替换控制器时根一旦释放，模型跟着走，四个页面立刻拿到 nil —— 保存恒失败、
+// 自检恒空白。页面自己持有最稳，且 SIOModel 不反向引用页面，不存在循环引用。
+@property (strong) SIOModel *model;
 @property (strong) UIStackView *stack;
 @property (strong) UIScrollView *scroll;        // v2.1.20：键盘避让要用
 @property (strong) UIBarButtonItem *saveItem;   // v2.1.20：未保存标记
@@ -3683,11 +3686,9 @@ static BOOL SIOColorIsRed(UIColor *c) {
     if (rep.length == 0) {
         rep = [NSString stringWithFormat:
                @"自检未生成内容（诊断信息）\n\n"
-                "model = %p%s\nreportView = %p\n\n"
-                "如果 model 为 0x0，说明本页拿到的是空模型，请在「引擎」页点一次保存后回来重试，"
-                "并把这张截图发我。",
+                "model = %p\nreportView = %p\n\n"
+                "model 为 0x0 说明本页拿到的是空模型（模型被提前释放）。",
                (__bridge void *)self.model,
-               self.model ? "" : "（空）",
                (__bridge void *)self.reportView];
     }
     self.reportView.text = rep;
@@ -4196,6 +4197,11 @@ UIViewController *MXCreateJisuRootVC(void) {
     // v2.5.6：必须在这里强持有。四个页面只有 weak 引用，少了这一行 model 会在本函数
     // 返回时立刻释放，保存与自检全部走 nil 分支（弹窗「保存失败」、自检区空白）。
     root.model = model;
+    // v2.5.7：再补一道进程级强引用。真机复测表明 root 本身也可能被 Swift 外壳释放
+    // （self.model 仍为 nil），只靠 root 强持有并不够。函数内 static 生命周期等同进程，
+    // 保证模型不会被回收；页面侧也已改为 strong，双保险。
+    static SIOModel *sKeepAlive = nil;
+    sKeepAlive = model;
 
     if (gMigratedDirty) {
         dispatch_async(dispatch_get_main_queue(), ^{
