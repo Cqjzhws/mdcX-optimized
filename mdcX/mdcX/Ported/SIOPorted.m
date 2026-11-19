@@ -130,7 +130,9 @@ static NSString *gLastWriteReason = nil;
 //   ② 原子写失败后走 POSIX open/write，fd/write 的 errno 才是可信的；
 //   ③ 两条都失败时把真实原因带进弹窗。
 static BOOL SIOWritePlist(NSDictionary *d, NSString *path) {
-    gLastWriteErrno = 0; gLastWritePath = path; gLastWriteReason = nil;
+    // v2.5.5：这里不再重置 gLastWriteReason —— save() 会连续写三个文件，
+    // 上一次失败的信息不能被下一次成功覆写掉（真机就出现了「明明失败却显示未知」）。
+    gLastWritePath = path;
 
     NSError *err = nil;
     NSData *data = [NSPropertyListSerialization dataWithPropertyList:d
@@ -1472,6 +1474,17 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
         sceneNames[MAX(0, MIN(4, (int)self.segSpeedList.selectedSegmentIndex))]];
     self.lblSpeedWeb.text   = [NSString stringWithFormat:@"当前：%@",
         sceneNames[MAX(0, MIN(4, (int)self.segSpeedWeb.selectedSegmentIndex))]];
+    // v2.5.5：控件入窗后再断言一次选中态。iOS 26 的玻璃分段样式在「未入窗时设置
+    // selectedSegmentIndex」会把指示块画在错误位置（真机表现：文字是「跟随全局」，
+    // 高亮却停在最右的 ×40）。入窗后重设一次即可让指示块与文字对齐。
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.segSpeedTrans.selectedSegmentIndex =
+            SceneSpeedIndex(c[@"SpeedTransition"] ? [c[@"SpeedTransition"] doubleValue] : 0.0);
+        self.segSpeedList.selectedSegmentIndex =
+            SceneSpeedIndex(c[@"SpeedList"] ? [c[@"SpeedList"] doubleValue] : 0.0);
+        self.segSpeedWeb.selectedSegmentIndex =
+            SceneSpeedIndex(c[@"SpeedWeb"] ? [c[@"SpeedWeb"] doubleValue] : 0.0);
+    });
     self.swSpring.on = [c[@"Spring"] boolValue];
     self.swExtra.on = [c[@"Extra"] boolValue];
 
@@ -1801,6 +1814,8 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
     // UIKit 拖拽系数其实已被改，下次保存还会带着这些"幽灵改动"。
     // 现在聚合三者返回值：任一失败即返回 NO，让调用方知道并非整体成功。
     BOOL ok       = WriteConfig(cfg);
+    // 主配置的失败原因必须先抓住：后面两次辅助写可能把它覆盖掉
+    NSString *mainFailReason = ok ? nil : gLastWriteReason;
     BOOL axOk     = WriteAxBatch(@{ @"ReduceMotionEnabled":        @(self.swRM.on),
                                     @"PreferCrossFadeTransitions": @(self.swCF.on),
                                     @"ReduceTransparencyEnabled":  @(self.swRT.on) });
@@ -1810,7 +1825,13 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
     if (!ok)       NSLog(@"[SIO] save: WriteConfig failed");
     if (!axOk)     NSLog(@"[SIO] save: WriteAxBatch failed");
     if (!dragOk)   NSLog(@"[SIO] save: WriteUIKitDrag failed");
-    return ok && axOk && dragOk;
+    // v2.5.5：主配置写成即算保存成功。ReduceMotion / 拖拽系数是辅助项，
+    // 它们写不进（例如 Accessibility.plist 受系统保护）不该把整次保存判为失败 ——
+    // 真机上「主 plist 明明可写、却一直弹保存失败」就是这条链造成的。
+    if (!ok) {
+        gLastWriteReason = mainFailReason ?: @"主配置写入失败（写入接口未返回原因）";
+    }
+    return ok;
 }
 
 // v2.1.20（功能增强）：恢复出厂设置。
@@ -3656,7 +3677,20 @@ static BOOL SIOColorIsRed(UIColor *c) {
 
 - (void)doCheck {
 // v2.1.9：点击反馈 —— 震动 + 按钮标题短暂变化 + 报告含检测时间，肉眼可见「真的重新检测了」
-    self.reportView.text = [self.model checkReport];
+    // v2.5.5：自检区空白时给出可诊断的原因。真机上点「重新检测」仍然全空，
+    // 说明不是覆盖时序问题，而是 checkReport 拿不到东西（多半 model 为 nil）。
+    NSString *rep = [self.model checkReport];
+    if (rep.length == 0) {
+        rep = [NSString stringWithFormat:
+               @"自检未生成内容（诊断信息）\n\n"
+                "model = %p%s\nreportView = %p\n\n"
+                "如果 model 为 0x0，说明本页拿到的是空模型，请在「引擎」页点一次保存后回来重试，"
+                "并把这张截图发我。",
+               (__bridge void *)self.model,
+               self.model ? "" : "（空）",
+               (__bridge void *)self.reportView];
+    }
+    self.reportView.text = rep;
     [self.reportView setContentOffset:CGPointZero animated:NO];
     if (self.checkPill) {
         UIImpactFeedbackGenerator *g = [[UIImpactFeedbackGenerator alloc]
