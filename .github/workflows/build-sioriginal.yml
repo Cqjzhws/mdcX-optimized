@@ -1,0 +1,53 @@
+name: Build SIOriginal engine (SwiftUI bridge)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'SIOriginal/Tweak/**'
+      - '.github/workflows/build-sioriginal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SIOriginal.dylib (arm64)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build dylib (pure clang, no Substrate)
+        run: |
+          set -e
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "SDK: $SDK"
+          mkdir -p artifacts
+          clang -arch arm64 -dynamiclib -O2 \
+            -install_name @rpath/SIOriginal.dylib \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=14.0 \
+            -undefined dynamic_lookup -fobjc-arc \
+            -framework Foundation -framework UIKit -framework QuartzCore \
+            -framework AVFoundation -framework UserNotifications \
+            -o artifacts/SIOriginal.dylib SIOriginal/Tweak/SIOriginal.m
+          codesign --force --sign - artifacts/SIOriginal.dylib
+          lipo -info artifacts/SIOriginal.dylib
+          file artifacts/SIOriginal.dylib
+          echo "dylib size: $(du -h artifacts/SIOriginal.dylib | cut -f1)"
+
+      - name: Verify artifacts
+        run: |
+          set -e
+          ls -lh artifacts/
+          nm -gU artifacts/SIOriginal.dylib | head -20 || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SIOriginal-dylib
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
