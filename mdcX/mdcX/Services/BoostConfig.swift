@@ -12,6 +12,8 @@ import Foundation
 // MARK: - 档位模型
 
 enum BoostProfile: Int, CaseIterable, Identifiable {
+    static var all: [BoostProfile] { allCases }
+
     case safe     = 0
     case balanced = 1
     case turbo    = 2
@@ -55,6 +57,8 @@ enum BoostProfile: Int, CaseIterable, Identifiable {
 // MARK: - 后台保活强度
 
 enum BoostBGMode: Int, CaseIterable, Identifiable {
+    static var all: [BoostBGMode] { allCases }
+
     case audioOnly = 0
     case audioTask = 1
     case full      = 2
@@ -120,6 +124,9 @@ final class BoostConfig {
     }
 
     private(set) var state = State()
+
+    /// 供同文件内的 BoostManager 修改内存镜像；落盘仍统一走 commit()
+    func edit(_ body: (inout State) -> Void) { body(&state) }
 
     private init() { load() }
 
