@@ -106,6 +106,45 @@ static void SpawnRootNowait(NSString *path, NSArray *args) {
     if (rc != 0) NSLog(@"[SIO] SpawnRootNowait %@ failed: rc=%d (%s)", path, rc, strerror(rc));
 }
 
+// v2.5.3：原生 iOS 没有 /usr/sbin/chown、/bin/chmod（那是越狱 bootstrap 才有的），
+// 于是 v2.4.4 那条「以 root 修属主」的兜底在巨魔环境下 100% 返回 ENOENT —— 保存失败
+// 永远修不好，用户看到的还是「无法写入 com.apple.UIKit.plist」。
+// 改为自旋自身可执行文件：带 --sio-fixperm 以 root persona 重入，由下面的
+// constructor 完成 chown/chmod，不依赖任何外部二进制。
+static void SIOFixPermissionsAsRoot(void) {
+    NSString *selfPath = [[NSBundle mainBundle] executablePath];
+    if (!selfPath.length) return;
+    SpawnRoot(selfPath, @[ @"--sio-fixperm" ]);
+}
+
+// 原子写失败先降级直写。最常见失败场景是「目录属主是 root、文件属主是 mobile」：
+// 原子写要在同目录新建临时文件 → EACCES；直写只覆盖已有文件内容即可成功。
+static BOOL SIOWritePlist(NSDictionary *d, NSString *path) {
+    if ([d writeToFile:path atomically:YES]) return YES;
+    int e1 = errno;
+    if ([d writeToFile:path atomically:NO]) {
+        NSLog(@"[SIO] atomic write failed (errno=%d), direct write ok: %@", e1, path);
+        return YES;
+    }
+    NSLog(@"[SIO] write failed: %@ (atomic=%d direct=%d)", path, e1, errno);
+    return NO;
+}
+
+// 以 root persona 自旋的辅助进程入口。必须在 UIApplicationMain 之前完成并退出，
+// 否则会多起一个 App 实例。只有 argv 带 --sio-fixperm 时生效。
+__attribute__((constructor))
+static void SIOFixPermEntry(void) {
+    NSArray *args = [NSProcessInfo processInfo].arguments;
+    if (![args containsObject:@"--sio-fixperm"]) return;
+    const char *dir = "/var/Managed Preferences/mobile";
+    chown(dir, 501, 501);          // 501 = mobile
+    chmod(dir, 0755);
+    NSString *p = PrefPath;
+    chown(p.fileSystemRepresentation, 501, 501);
+    chmod(p.fileSystemRepresentation, 0644);
+    _exit(0);
+}
+
 static NSString *SIOReboot(void) {
     pid_t pid;
 
@@ -272,17 +311,14 @@ static BOOL WriteConfig(NSMutableDictionary *cfg) {
     for (NSString *k in SIOConfigKeys()) {
         if (cfg[k]) merged[k] = cfg[k];
     }
-    BOOL ok = [merged writeToFile:PrefPath atomically:YES];
+    BOOL ok = SIOWritePlist(merged, PrefPath);
     if (!ok) {
-        // v2.4.4 修复「不能保存配置」：/var/Managed Preferences/mobile 一旦被
-        // root 拥有的进程（或旧版提权写入器）动过，目录/旧 plist 属主漂移成 root，
-        // mobile 身份的 App 原子写（先建临时文件再 rename）必败（EPERM），表现为
-        // 点保存永远失败。借 TrollStore persona 提权把属主还回 mobile 再重试一次。
-        NSLog(@"[SIO] WriteConfig direct write failed (errno=%d %s), fixing ownership as root and retrying",
+        // v2.5.3：原子写 + 直写都失败时，才需要 root 修属主。注意不能再用
+        // /usr/sbin/chown（原生 iOS 没有该文件），改为自旋自身。
+        NSLog(@"[SIO] WriteConfig failed (errno=%d %s), fixing ownership as root and retrying",
               errno, strerror(errno));
-        SpawnRoot(@"/usr/sbin/chown", @[@"-R", @"mobile:mobile", @"/var/Managed Preferences/mobile"]);
-        SpawnRoot(@"/bin/chmod", @[@"755", @"/var/Managed Preferences/mobile"]);
-        ok = [merged writeToFile:PrefPath atomically:YES];
+        SIOFixPermissionsAsRoot();
+        ok = SIOWritePlist(merged, PrefPath);
         if (!ok) NSLog(@"[SIO] WriteConfig retry after chown still failed (errno=%d %s)",
                        errno, strerror(errno));
     }
@@ -395,7 +431,7 @@ static BOOL WriteAxBatch(NSDictionary *kv) {
     NSMutableDictionary *d = [[NSDictionary dictionaryWithContentsOfFile:AxPath] mutableCopy];
     if (!d) d = [NSMutableDictionary dictionary];
     for (NSString *k in kv) d[k] = kv[k];
-    return [d writeToFile:AxPath atomically:YES];
+    return SIOWritePlist(d, AxPath);
 }
 
 static double ReadUIKitDrag(void) {
@@ -414,7 +450,7 @@ static BOOL WriteUIKitDrag(double coeff) {
     }
     mkdir("/var/Managed Preferences", 0755);
     mkdir("/var/Managed Preferences/mobile", 0755);
-    return [d writeToFile:PrefPath atomically:YES];
+    return SIOWritePlist(d, PrefPath);
 }
 // 分档索引 → 系数：0=关闭 1=×5(0.2) 2=×10(0.1) 3=×20(0.05) 4=极端(0.0001)
 static double DragCoeffForIndex(int i) {
