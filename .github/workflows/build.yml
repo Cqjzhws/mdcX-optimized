@@ -1,4 +1,4 @@
-name: Build IPA + dylib
+﻿name: Build IPA + dylib
 
 on:
   push:
@@ -6,8 +6,10 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# 整合分支使用独立并发组：避免与 main 分支的历史 run 抢同一个
+# mdcx-build-main 组而被 cancel-in-progress 秒取消（构建根本没启动）。
 concurrency:
-  group: mdcx-build-main
+  group: mdcx-ported-fuclean
   cancel-in-progress: false
 
 env:
@@ -100,23 +102,51 @@ jobs:
           # ---- 签主程序并注入特权 entitlements（含 persona-mgmt，root spawn 的钥匙）----
           codesign --force --sign - --entitlements "$ENT_FILE" "$APP_PATH/mdcX"
 
+          # -----------------------------------------------------------
+          # 源码级移植的两个官方工程，还有「包内资源」需要由 CI 补进 app bundle：
+          #   ① 清理Pro 的 root helper —— 官方工程里是独立命令行工具，由
+          #      FUClean/Helper/main.m 用 clang 单独编译，Xcode target 不碰它。
+          #   ② 极速IOS 配置器右上角头像 —— 源码用
+          #      pathForResource:@"Owner" ofType:@"jpg" 从 main bundle 取。
+          #
+          # helper 单独签一份独立 entitlements（FUCleanHelper.entitlements），
+          # mdcX 主程序的 entitlements 保持原样、一个 key 都不加 ——
+          # 三块功能各走各的权限集，互不干扰。
+          # -----------------------------------------------------------
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "Using SDK for ported helper: $SDK"
+
+          mkdir -p "$APP_PATH/Helpers"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -O2 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=14.0 \
+            -fobjc-arc \
+            -framework Foundation \
+            -o "$APP_PATH/Helpers/fuclean-helper" \
+            "${GITHUB_WORKSPACE}/FUCleanHelper/main.m"
+          if [ ! -f "$APP_PATH/Helpers/fuclean-helper" ]; then
+            echo "fuclean-helper build FAILED"
+            exit 1
+          fi
+
+          HELPER_ENT="${GITHUB_WORKSPACE}/FUCleanHelper.entitlements"
+          plutil -lint "$HELPER_ENT"
+          codesign --force --sign - --entitlements "$HELPER_ENT" \
+            "$APP_PATH/Helpers/fuclean-helper"
+          chmod 755 "$APP_PATH/Helpers/fuclean-helper"
+          echo "== Helper entitlements =="
+          codesign -d --entitlements - "$APP_PATH/Helpers/fuclean-helper" 2>&1 | head -30 || true
+          file "$APP_PATH/Helpers/fuclean-helper"
+
+          if [ -f "${GITHUB_WORKSPACE}/PortedResources/Owner.jpg" ]; then
+            cp "${GITHUB_WORKSPACE}/PortedResources/Owner.jpg" "$APP_PATH/Owner.jpg"
+            echo "Copied Owner.jpg for 极速IOS 配置器"
+          fi
+
           echo "== Embedded entitlements =="
           codesign -d --entitlements - "$APP_PATH/mdcX" 2>&1 | head -40 || true
           ls -la "$APP_PATH"
-
-          # -----------------------------------------------------------
-          # 内置 mdcX Boost 自研加速 dylib（随 IPA 分发，供 TrollFools 注入目标进程）
-          # 这是本次新增：mdcX 主 App 的「加速」页负责写配置，真正的运行时 hook
-          # 由这份 dylib 注入 SpringBoard/目标 App 后生效。
-          # -----------------------------------------------------------
-          BOOST_DYLIB="${GITHUB_WORKSPACE}/Boost/out/mdcxboost.dylib"
-          if [ -f "$BOOST_DYLIB" ]; then
-            cp "$BOOST_DYLIB" "$APP_PATH/mdcxboost.dylib"
-            chmod 644 "$APP_PATH/mdcxboost.dylib"
-            echo "Bundled mdcxboost.dylib into app ($(stat -f%z "$APP_PATH/mdcxboost.dylib") bytes)"
-          else
-            echo "WARNING: Boost/out/mdcxboost.dylib not found; accel page will have no engine to inject"
-          fi
 
           echo "Packing IPA manually..."
           mkdir -p build/ipa/Payload
@@ -182,10 +212,6 @@ jobs:
 
           2. mdcXCore.dylib — arm64 核心利用库（导出 mdcx_zero_file /
              mdcx_overwrite_file / mdcx_core_version）。
-
-          3. App 包内的 mdcxboost.dylib — mdcX Boost 自研运行时加速引擎。
-             用 TrollFools 把它注入 SpringBoard / 目标 App 后，在本 App「加速」页
-             选档位即可生效（动画/响应/启动/后台保活）。改档位无需重新注入。
           EOF
           cd build/bundle
           zip -qr mdcX-Max-${APP_VERSION}-bundle.zip mdcX-Max-${APP_VERSION}

@@ -11,57 +11,59 @@ struct RootView: View {
     @StateObject private var logStore = LogStore()
     @ObservedObject private var settings = AppSettings.shared
     @State private var sharedBusy: Bool = false
+    @State private var selection: Int = 0
 
     var body: some View {
-        TabView {
-            NavigationView {
-                ContentView(logStore: logStore,
-                            onBusyChange: { sharedBusy = $0 })
-            }
-            .navigationViewStyle(.stack)
-            .tabItem {
-                Label("美化", systemImage: "wand.and.stars")
-            }
+        // 7 格自绘底部栏：系统 TabView 超过 5 项会把多余项折进「更多」，
+        // 无法让「极速」「清理」直接出现在底部。原 5 个页面构造代码逐字保留。
+        // 用 VStack 而非 safeAreaInset：让内容区 frame 真实缩小，
+        // 这样两个 UIKit 页面（清理页 scrollView 贴 view.bottomAnchor）不会被栏遮住。
+        VStack(spacing: 0) {
+            ZStack {
+                NavigationView {
+                    ContentView(logStore: logStore,
+                                onBusyChange: { sharedBusy = $0 })
+                }
+                .navigationViewStyle(.stack)
+                .mxPage(selection, index: 0)
 
-            NavigationView {
-                BoostView(logStore: logStore)
-            }
-            .navigationViewStyle(.stack)
-            .tabItem {
-                Label("加速", systemImage: "bolt.fill")
-            }
+                NavigationView {
+                    ResolutionView(isBusy: $sharedBusy, logStore: logStore)
+                }
+                .navigationViewStyle(.stack)
+                .mxPage(selection, index: 1)
 
-            NavigationView {
-                ResolutionView(isBusy: $sharedBusy, logStore: logStore)
-            }
-            .navigationViewStyle(.stack)
-            .tabItem {
-                Label("显示", systemImage: "display")
-            }
+                NavigationView {
+                    DaemonView(isBusy: $sharedBusy, logStore: logStore)
+                }
+                .navigationViewStyle(.stack)
+                .mxPage(selection, index: 2)
 
-            NavigationView {
-                DaemonView(isBusy: $sharedBusy, logStore: logStore)
-            }
-            .navigationViewStyle(.stack)
-            .tabItem {
-                Label("守护进程", systemImage: "rectangle.stack.badge.minus")
-            }
+                NavigationView {
+                    ToolsView(logStore: logStore, isBusy: $sharedBusy)
+                }
+                .navigationViewStyle(.stack)
+                .mxPage(selection, index: 3)
 
-            NavigationView {
-                ToolsView(logStore: logStore, isBusy: $sharedBusy)
-            }
-            .navigationViewStyle(.stack)
-            .tabItem {
-                Label("工具箱", systemImage: "wrench.fill")
-            }
+                NavigationView {
+                    SettingsView(logStore: logStore)
+                }
+                .navigationViewStyle(.stack)
+                .mxPage(selection, index: 4)
 
-            NavigationView {
-                SettingsView(logStore: logStore)
+                // 源码级移植进来的两个功能页（Ported/SIOPorted.m、Ported/FUCleanPorted.m）
+                MXJisuView()
+                    .mxPage(selection, index: 5)
+
+                MXCleanView()
+                    .mxPage(selection, index: 6)
             }
-            .navigationViewStyle(.stack)
-            .tabItem {
-                Label("设置", systemImage: "gearshape.fill")
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            MXTabBar(selection: $selection,
+                     tabs: MXTabs.all,
+                     tint: settings.theme.primary,
+                     anim: settings.anim)
         }
         .tint(settings.theme.primary)
         .preferredColorScheme(.dark)
@@ -75,13 +77,21 @@ struct RootView: View {
 // 所以「重启设备」的实际做法是：把本 App 以 root 再起一份、带上 TSRebootHelperFlag，
 // 那一份在进 UI 之前（下面这个 main 的最开头）就调 reboot 并把自己结束掉。
 //
-// 时机刻意选在 main 开头，而不是 __attribute__((constructor))。
+// 时机刻意与 SIOriginal 对齐：main 开头，而不是 __attribute__((constructor))。
 // constructor 阶段进程的 persona uid 是否已经生效没有真机验证过，不冒这个险。
 
 @main
 struct mdcXEntry {
     static func main() {
-        if TSRootSpawn.isRebootHelperLaunch() {
+        // mdcX 自身的重启助手：--mdcx-reboot-helper
+        //
+        // 极速IOS 源码里的 SIOReboot() 会以 persona 99 / uid0 重新 spawn 自身并带
+        // "--sio-reboot-helper"，原本由它自己的 main() 截住后调 reboot(2)。
+        // 源码级移植时那个 main() 必须移除（会与 @main 冲突），这里在同一个
+        // 入口补回拦截点，复用 mdcX 已真机验证过的 performRebootHelper。
+        // 极速源码本身一个字未改。
+        if TSRootSpawn.isRebootHelperLaunch()
+            || CommandLine.arguments.contains("--sio-reboot-helper") {
             // 成功则设备重启、不返回；失败内部会 _exit(42)
             TSRootSpawn.performRebootHelper()
             return
