@@ -61,7 +61,7 @@ final class BoostManager {
 
     @discardableResult
     func setEnabled(_ on: Bool) -> BoostApplyResult {
-        config.state.enabled = on
+        config.edit { $0.enabled = on }
         let ok = config.commit()
         return BoostApplyResult(
             succeeded: ok,
@@ -73,10 +73,10 @@ final class BoostManager {
     @discardableResult
     func setToggle(_ key: ToggleKey, value: Bool) -> BoostApplyResult {
         switch key {
-        case .transition: config.state.transitionBoost = value
-        case .interaction: config.state.interactionBoost = value
-        case .background: config.state.backgroundKeep = value
-        case .circuit: config.state.circuit = value
+        case .transition: config.edit { $0.transitionBoost = value }
+        case .interaction: config.edit { $0.interactionBoost = value }
+        case .background: config.edit { $0.backgroundKeep = value }
+        case .circuit: config.edit { $0.circuit = value }
         }
         let ok = config.commit()
         return BoostApplyResult(succeeded: ok, message: ok ? "设置已生效。" : "配置写入失败。")
@@ -84,7 +84,7 @@ final class BoostManager {
 
     @discardableResult
     func setBGMode(_ m: BoostBGMode) -> BoostApplyResult {
-        config.state.bgMode = m
+        config.edit { $0.bgMode = m }
         let ok = config.commit()
         return BoostApplyResult(succeeded: ok, message: ok ? "后台保活强度：\(m.displayName)。" : "配置写入失败。")
     }
