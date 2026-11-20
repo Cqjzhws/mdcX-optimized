@@ -33,6 +33,18 @@ jobs:
       - name: Ensure helper executable bit
         run: chmod +x mdcX/tools/killall || true
 
+      # v2.6.1 精简：Assets.car 占包体 80%（3.6MB），来源就是这一张 1024 图标。
+      # 先用 pngcrush 做无损重压（不改变尺寸与内容，只去掉编码冗余）。
+      - name: Lossless-compress app icon
+        run: |
+          ICON="mdcX/mdcX/Assets.xcassets/AppIcon.appiconset/mdcX.png"
+          if [ -f "$ICON" ]; then
+            BEFORE=$(stat -f%z "$ICON")
+            xcrun pngcrush -brute -reduce -ow "$ICON" >/dev/null 2>&1 || true
+            AFTER=$(stat -f%z "$ICON")
+            echo "icon: ${BEFORE} -> ${AFTER} bytes"
+          fi
+
       # 本流程不签任何 ldid 二进制：主程序用 codesign，包内 killall 刻意保持原签名。
       # 所以安装 ldid 这一步纯属白等一次 brew install，删掉。
 
@@ -61,6 +73,7 @@ jobs:
             CLEAN_BUILD_FOLDER=YES \
             STRIP_INSTALLED_PRODUCT=YES \
             DEPLOYMENT_POSTPROCESSING=YES \
+            ASSETCATALOG_COMPILER_OPTIMIZATION=space \
             OTHER_LDFLAGS='$(inherited) -Wl,-dead_strip' \
             archive 2>&1 | tee build.log
 
