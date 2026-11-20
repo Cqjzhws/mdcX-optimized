@@ -646,33 +646,45 @@ static UIColor *SIO_Dyn(UIColor *(^light)(void), UIColor *(^dark)(void)) {
 }
 
 // 语义色：与设计稿令牌同名（Glass 变量集）
-static UIColor *SIOBG(void)            { return SIO_Dyn(^{ return SIO_RGBA(0.945,0.965,0.953,1.0); },
-                                                        ^{ return SIO_RGBA(0.020,0.031,0.043,1.0); }); }
-static UIColor *SIOSurface(void)       { return SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.66); },
-                                                        ^{ return SIO_RGBA(1,1,1,0.10); }); }
-static UIColor *SIOSurfaceStrong(void) { return SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.82); },
-                                                        ^{ return SIO_RGBA(1,1,1,0.17); }); }
+//
+// 精简：dynamic UIColor 是常量（其 provider 会随系统 trait 自动重新求值），
+// 原来每次调用都新建一个 colorWithDynamicProvider + block copy。这些函数
+// 在极速页主题刷新/建 UI 时被调用上百次，改为 dispatch_once 静态单例后
+// 行为完全一致（深浅色仍由同一个 dynamic provider 解析），零重复分配。
+#define SIO_COLOR_SINGLETON(name, body) \
+static UIColor *name(void) { \
+    static UIColor *c; static dispatch_once_t once; \
+    dispatch_once(&once, ^{ c = (body); }); \
+    return c; \
+}
+
+SIO_COLOR_SINGLETON(SIOBG,            SIO_Dyn(^{ return SIO_RGBA(0.945,0.965,0.953,1.0); },
+                                               ^{ return SIO_RGBA(0.020,0.031,0.043,1.0); }))
+SIO_COLOR_SINGLETON(SIOSurface,       SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.66); },
+                                               ^{ return SIO_RGBA(1,1,1,0.10); }))
+SIO_COLOR_SINGLETON(SIOSurfaceStrong, SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.82); },
+                                               ^{ return SIO_RGBA(1,1,1,0.17); }))
 // iOS 26 的 UIGlassEffect 自带折射与 layer 感，再压 66% 白就成白板了，这里收薄
-static UIColor *SIOSurfaceGlass26(void) { return SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.42); },
-                                                         ^{ return SIO_RGBA(1,1,1,0.06); }); }
-static UIColor *SIOBorder(void)        { return SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.92); },
-                                                        ^{ return SIO_RGBA(1,1,1,0.22); }); }
-static UIColor *SIOBorderSoft(void)    { return SIO_Dyn(^{ return SIO_RGBA(0.16,0.30,0.25,0.10); },
-                                                        ^{ return SIO_RGBA(1,1,1,0.11); }); }
-static UIColor *SIOTextPri(void)       { return SIO_Dyn(^{ return SIO_RGBA(0.043,0.102,0.082,1.0); },
-                                                        ^{ return SIO_RGBA(0.933,0.965,0.953,1.0); }); }
-static UIColor *SIOTextSec(void)       { return SIO_Dyn(^{ return SIO_RGBA(0.353,0.420,0.396,1.0); },
-                                                        ^{ return SIO_RGBA(0.720,0.800,0.770,1.0); }); }
-static UIColor *SIOTextTer(void)       { return SIO_Dyn(^{ return SIO_RGBA(0.440,0.510,0.480,1.0); },
-                                                        ^{ return SIO_RGBA(0.560,0.630,0.610,1.0); }); }
-static UIColor *SIOAccentSoft(void)    { return SIO_Dyn(^{ return SIO_RGBA(0.039,0.502,0.349,0.13); },
-                                                        ^{ return SIO_RGBA(0.220,0.850,0.630,0.18); }); }
-static UIColor *SIOTrack(void)         { return SIO_Dyn(^{ return SIO_RGBA(0.10,0.20,0.17,0.10); },
-                                                        ^{ return SIO_RGBA(1,1,1,0.13); }); }
+SIO_COLOR_SINGLETON(SIOSurfaceGlass26, SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.42); },
+                                                ^{ return SIO_RGBA(1,1,1,0.06); }))
+SIO_COLOR_SINGLETON(SIOBorder,        SIO_Dyn(^{ return SIO_RGBA(1,1,1,0.92); },
+                                               ^{ return SIO_RGBA(1,1,1,0.22); }))
+SIO_COLOR_SINGLETON(SIOBorderSoft,    SIO_Dyn(^{ return SIO_RGBA(0.16,0.30,0.25,0.10); },
+                                               ^{ return SIO_RGBA(1,1,1,0.11); }))
+SIO_COLOR_SINGLETON(SIOTextPri,       SIO_Dyn(^{ return SIO_RGBA(0.043,0.102,0.082,1.0); },
+                                               ^{ return SIO_RGBA(0.933,0.965,0.953,1.0); }))
+SIO_COLOR_SINGLETON(SIOTextSec,       SIO_Dyn(^{ return SIO_RGBA(0.353,0.420,0.396,1.0); },
+                                               ^{ return SIO_RGBA(0.720,0.800,0.770,1.0); }))
+SIO_COLOR_SINGLETON(SIOTextTer,       SIO_Dyn(^{ return SIO_RGBA(0.440,0.510,0.480,1.0); },
+                                               ^{ return SIO_RGBA(0.560,0.630,0.610,1.0); }))
+SIO_COLOR_SINGLETON(SIOAccentSoft,    SIO_Dyn(^{ return SIO_RGBA(0.039,0.502,0.349,0.13); },
+                                               ^{ return SIO_RGBA(0.220,0.850,0.630,0.18); }))
+SIO_COLOR_SINGLETON(SIOTrack,         SIO_Dyn(^{ return SIO_RGBA(0.10,0.20,0.17,0.10); },
+                                               ^{ return SIO_RGBA(1,1,1,0.13); }))
 static UIColor *SIOOnGlass(CGFloat a)  { return SIO_RGBA(1,1,1,a); }
 
 // 品牌色：祖母绿。浅色用深一点的保证对比度，深色提亮（与设计稿一致）
-static UIColor *SIOAccent(void) {
+static UIColor *SIOAccentResolved(void) {
     if (@available(iOS 13.0, *)) {
         return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
             if (tc.userInterfaceStyle == UIUserInterfaceStyleDark)
@@ -682,6 +694,7 @@ static UIColor *SIOAccent(void) {
     }
     return [UIColor colorWithRed:0.04 green:0.50 blue:0.36 alpha:1.0];
 }
+SIO_COLOR_SINGLETON(SIOAccent, SIOAccentResolved())
 
 static UIFont *SIOFontCapped(CGFloat size, UIFontWeight weight, CGFloat cap) {
     UIFont *base = [UIFont systemFontOfSize:size weight:weight];
@@ -696,11 +709,29 @@ static UIFont *SIOFont(CGFloat size, UIFontWeight weight) {
 // iOS 26 的 UIGlassEffect 只能在运行时探测：用旧 SDK 编译时符号不存在，
 // 直接写会编译不过，所以走 NSClassFromString + objc_msgSend。
 static UIVisualEffect *SIOGlassEffect(UIColor *tint) {
+    // tint == nil 是绝大多数调用（SIOGlassView 的主题刷新每次都走这里）。
+    // effect 与深浅模式/elevated 无关，且 UIKit 对「赋值同一个 effect 对象」
+    // 是 no-op；缓存单例后，切 Tab 触发的 didMoveToWindow→sio_applyTheme
+    // 不再重建模糊/玻璃渲染管线，也不再有 NSClassFromString/objc_msgSend 开销。
+    // tint 非 nil 的调用保持原行为（当前项目无此调用，留作兼容）。
+    if (!tint) {
+        static UIVisualEffect *shared = nil;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            Class cls = NSClassFromString(@"UIGlassEffect");
+            if (cls && [cls respondsToSelector:@selector(effectWithStyle:)]) {
+                id fx = ((id (*)(id, SEL, NSInteger))objc_msgSend)(cls, @selector(effectWithStyle:), 0);
+                if (fx) shared = (UIVisualEffect *)fx;
+            }
+            if (!shared) shared = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial];
+        });
+        return shared;
+    }
     Class cls = NSClassFromString(@"UIGlassEffect");
     if (cls && [cls respondsToSelector:@selector(effectWithStyle:)]) {
         id fx = ((id (*)(id, SEL, NSInteger))objc_msgSend)(cls, @selector(effectWithStyle:), 0);
         if (fx) {
-            if (tint && [fx respondsToSelector:@selector(setTintColor:)]) {
+            if ([fx respondsToSelector:@selector(setTintColor:)]) {
                 [fx performSelector:@selector(setTintColor:) withObject:tint];
             }
             return (UIVisualEffect *)fx;
@@ -899,6 +930,7 @@ static UIVisualEffect *SIOGlassEffect(UIColor *tint) {
 
 @implementation SIOAmbientView {
     CAGradientLayer *_a, *_b, *_c;
+    CGSize _laidOutSize;   // bounds 未变则跳过 blob frame 重算
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -921,20 +953,30 @@ static UIVisualEffect *SIOGlassEffect(UIColor *tint) {
     l.type = kCAGradientLayerRadial;
     l.startPoint = CGPointMake(0.5, 0.5);
     l.endPoint = CGPointMake(1.0, 1.0);
+    l.locations = @[ @0.0, @1.0 ];   // 常量：原来每次 applyTheme 重设，移到 init 一次
     return l;
 }
 
 - (void)sio_applyTheme {
     BOOL dark = (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark);
     self.backgroundColor = SIOBG();
-    UIColor *emerald = dark ? SIO_RGBA(0.16,0.78,0.58,0.34) : SIO_RGBA(0.24,0.83,0.63,0.42);
-    UIColor *sky     = dark ? SIO_RGBA(0.22,0.58,0.90,0.26) : SIO_RGBA(0.32,0.62,0.95,0.32);
-    UIColor *lime    = dark ? SIO_RGBA(0.74,0.84,0.38,0.19) : SIO_RGBA(0.85,0.92,0.45,0.30);
-    for (CAGradientLayer *l in @[ _a, _b, _c ]) {
-        l.colors = @[ (id)((l == _a) ? emerald : (l == _b) ? sky : lime).CGColor,
-                      (id)[UIColor clearColor].CGColor ];
-        l.locations = @[ @0.0, @1.0 ];
-    }
+    // 精简：三块 blob 的渐变色是深浅两套常量，缓存后切 Tab 重刷主题时
+    // 直接复用 CGColor 数组，不再每次新建 UIColor/CGColor/NSArray。
+    static NSArray *lightA, *lightB, *lightC, *darkA, *darkB, *darkC;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        UIColor *clear = [UIColor clearColor];
+        lightA = @[ (id)SIO_RGBA(0.24,0.83,0.63,0.42).CGColor, (id)clear.CGColor ];
+        lightB = @[ (id)SIO_RGBA(0.32,0.62,0.95,0.32).CGColor, (id)clear.CGColor ];
+        lightC = @[ (id)SIO_RGBA(0.85,0.92,0.45,0.30).CGColor, (id)clear.CGColor ];
+        darkA  = @[ (id)SIO_RGBA(0.16,0.78,0.58,0.34).CGColor, (id)clear.CGColor ];
+        darkB  = @[ (id)SIO_RGBA(0.22,0.58,0.90,0.26).CGColor, (id)clear.CGColor ];
+        darkC  = @[ (id)SIO_RGBA(0.74,0.84,0.38,0.19).CGColor, (id)clear.CGColor ];
+    });
+    _a.colors = dark ? darkA : lightA;
+    _b.colors = dark ? darkB : lightB;
+    _c.colors = dark ? darkC : lightC;
+    // locations 常量，init 时设一次即可（见 sio_blob），无需每次重设
     [self setNeedsLayout];
 }
 
@@ -954,6 +996,10 @@ static UIVisualEffect *SIOGlassEffect(UIColor *tint) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect b = self.bounds;
+    // blob 的 frame 完全由 bounds 决定；尺寸没变就跳过，避免切 Tab/主题刷新时
+    // 对 3 块接近全屏的渐变层反复赋值 frame 触发重新栅格化。
+    if (CGSizeEqualToSize(b.size, _laidOutSize)) return;
+    _laidOutSize = b.size;
     CGFloat w = b.size.width, h = b.size.height;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
@@ -1174,6 +1220,8 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
 @interface SIOGradientHeader : UIView {
     CAGradientLayer *_grad;
     CAGradientLayer *_sheen;
+    __weak UILabel *_statusLabel;      // 避免每次 setStatusText 线性扫描 subviews
+    CGSize _laidOutSize;               // bounds 未变则跳过渐变 frame 重算
 }
 - (void)setStatusText:(NSString *)s;
 @end
@@ -1204,6 +1252,7 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
         _grad = [CAGradientLayer layer];
         _grad.startPoint = CGPointMake(0, 0);
         _grad.endPoint = CGPointMake(1, 1);
+        _grad.locations = @[ @0.0, @0.55, @1.0 ];   // 常量：原来每次 applyTheme 重设，移到 init 一次
         [clip.layer addSublayer:_grad];
 
         // 顶部反射高光
@@ -1248,6 +1297,7 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
 
         UILabel *st2 = SIOLabel(@"等待读取…", 12.5, SIOOnGlass(1.0));
         st2.tag = 99;
+        _statusLabel = st2;   // 缓存弱引用，setStatusText 不再遍历 subviews
         st2.font = SIOFontCapped(12.5, UIFontWeightSemibold, 1.3);
         st2.numberOfLines = 2;
 
@@ -1314,12 +1364,18 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
 
 - (void)sio_applyTheme {
     BOOL dark = (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark);
-    _grad.colors = @[
-        (id)(dark ? SIO_RGBA(0.09,0.55,0.42,1.0) : SIO_RGBA(0.055,0.60,0.45,1.0)).CGColor,
-        (id)(dark ? SIO_RGBA(0.05,0.28,0.42,1.0) : SIO_RGBA(0.055,0.36,0.52,1.0)).CGColor,
-        (id)(dark ? SIO_RGBA(0.02,0.06,0.13,1.0) : SIO_RGBA(0.03,0.09,0.20,1.0)).CGColor,
-    ];
-    _grad.locations = @[ @0.0, @0.55, @1.0 ];
+    // 渐变色与 locations 是深浅两套常量，缓存复用；主题重刷时零对象分配。
+    static NSArray *lightColors, *darkColors;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        lightColors = @[ (id)SIO_RGBA(0.055,0.60,0.45,1.0).CGColor,
+                         (id)SIO_RGBA(0.055,0.36,0.52,1.0).CGColor,
+                         (id)SIO_RGBA(0.03,0.09,0.20,1.0).CGColor ];
+        darkColors  = @[ (id)SIO_RGBA(0.09,0.55,0.42,1.0).CGColor,
+                         (id)SIO_RGBA(0.05,0.28,0.42,1.0).CGColor,
+                         (id)SIO_RGBA(0.02,0.06,0.13,1.0).CGColor ];
+    });
+    _grad.colors = dark ? darkColors : lightColors;
     self.layer.shadowOpacity = dark ? 0.42f : 0.26f;
 }
 
@@ -1337,16 +1393,21 @@ static void SIOStyleSegmented(UISegmentedControl *seg) {
 }
 
 - (void)setStatusText:(NSString *)s {
-    for (UIView *v in self.subviews)
-        if (v.tag == 99 && [v isKindOfClass:[UILabel class]]) ((UILabel *)v).text = s;
+    // 精简：原来每次遍历全部 subviews 按 tag 找标签；改为直接写缓存的弱引用。
+    // 状态行更新频繁（配置载入/每次切换页/预设应用），线性扫描是纯浪费。
+    _statusLabel.text = s;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    CGRect b = self.bounds;
+    // 渐变 frame 完全由 bounds 决定；尺寸没变则跳过，避免每个动画帧重建渐变几何。
+    if (CGSizeEqualToSize(b.size, _laidOutSize)) return;
+    _laidOutSize = b.size;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _grad.frame = self.bounds;
-    _sheen.frame = CGRectMake(0, 0, self.bounds.size.width, self.bounds.size.height * 0.55);
+    _grad.frame = b;
+    _sheen.frame = CGRectMake(0, 0, b.size.width, b.size.height * 0.55);
     [CATransaction commit];
 }
 @end
