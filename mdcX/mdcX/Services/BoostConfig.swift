@@ -97,6 +97,7 @@ final class BoostConfig {
         static let circuit          = "circuitBreaker"
         static let circuitWindow    = "circuitWindowSec"
         static let circuitLimit     = "circuitLimit"
+        static let appOverrides     = "appOverrides"
     }
 
     /// 默认保护名单（与 MXBConfig.m 的默认值一致）
@@ -104,6 +105,22 @@ final class BoostConfig {
         "com.tencent.xin",
         "com.tencent.weworkocal",
         "com.apple.mobilesafari"
+    ]
+
+    // MARK: 三个目标 App 的专项加速默认策略（与 MXBBoost.h 宏一致）
+    static let bidDouyin = "com.ss.iphone.ugc.Aweme"
+    static let bidWechat = "com.tencent.xin"
+    static let bidKnight = "com.sfic.knight"
+
+    /// 内置专项配置表；用户可在 plist.appOverrides 里按 bundle id 覆盖。
+    /// 倍率略低于 turbo(50)：抖音/顺丰 42×，微信 36×（Flutter+原生混合更保守）。
+    static let defaultAppOverrides: [String: [String: Any]] = [
+        bidDouyin: ["multiplier": 42.0, "floor": 0.008, "skipProtect": true,
+                    "interactionBoost": true, "transitionBoost": true],
+        bidWechat: ["multiplier": 36.0, "floor": 0.008, "skipProtect": true,
+                    "interactionBoost": true, "transitionBoost": true],
+        bidKnight: ["multiplier": 42.0, "floor": 0.008, "skipProtect": true,
+                    "interactionBoost": true, "transitionBoost": true],
     ]
 
     // MARK: 可写配置（内存镜像，来自 plist 或默认值）
@@ -121,6 +138,21 @@ final class BoostConfig {
         var circuit: Bool = true
         var circuitWindow: Double = 10
         var circuitLimit: Int = 6
+        // 每 App 专项加速：nil = 使用内置默认表；非 nil = 用户自定义（整体替换）
+        var appOverrides: [String: [String: Any]]? = nil
+    }
+
+    /// 当前生效的专项配置表（合并内置默认 + 用户覆盖，逐 bundle id 逐字段）
+    var effectiveAppOverrides: [String: [String: Any]] {
+        var merged = BoostConfig.defaultAppOverrides
+        if let custom = state.appOverrides {
+            for (bid, cfg) in custom {
+                var m = merged[bid] ?? [:]
+                for (k, v) in cfg { m[k] = v }   // 用户字段优先
+                merged[bid] = m
+            }
+        }
+        return merged
     }
 
     private(set) var state = State()
@@ -150,6 +182,7 @@ final class BoostConfig {
         if let v = d[K.circuit] as? Bool { s.circuit = v }
         if let v = d[K.circuitWindow] as? Double { s.circuitWindow = v }
         if let v = d[K.circuitLimit] as? Int { s.circuitLimit = v }
+        if let v = d[K.appOverrides] as? [String: [String: Any]] { s.appOverrides = v }
         state = s
     }
 
@@ -172,6 +205,8 @@ final class BoostConfig {
             K.circuitLimit: state.circuitLimit
         ]
         if let m = state.animMultiplier { d[K.animMultiplier] = m }
+        // 落盘生效的专项配置表（含内置默认），确保 dylib 即使无内置兜底也能读到
+        d[K.appOverrides] = effectiveAppOverrides as NSDictionary
 
         let ok = d.write(toFile: Self.prefsPath, atomically: true)
         if ok { notifyReload() }
@@ -186,7 +221,22 @@ final class BoostConfig {
         return commit()
     }
 
-    /// 恢复出厂（安全档 + 全开关默认 + 默认保护名单）
+    /// 设置某个目标 App 的专属倍率（nil 恢复该 App 的内置默认）
+    @discardableResult
+    func setOverrideMultiplier(_ mult: Double?, forBundleID bid: String) -> Bool {
+        var custom = state.appOverrides ?? [:]
+        if let m = mult {
+            var cfg = custom[bid] ?? [:]
+            cfg["multiplier"] = m
+            custom[bid] = cfg
+        } else {
+            custom.removeValue(forKey: bid)   // 移除该 App 的自定义，回落到内置默认
+        }
+        state.appOverrides = custom.isEmpty ? nil : custom
+        return commit()
+    }
+
+    /// 恢复出厂（安全档 + 全开关默认 + 默认保护名单 + 清空自定义专项配置）
     @discardableResult
     func resetToDefaults() -> Bool {
         state = State()
