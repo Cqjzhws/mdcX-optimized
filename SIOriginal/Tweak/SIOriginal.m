@@ -871,13 +871,48 @@ static NSString *SIO_bundleID(void) {
 //                                          FUBGEnabled = 1; FUBGSceneFake = 1; FUBGAudioKeep = 1; }; }
 // 命中当前进程则返回该字典，否则 nil。优先级：硬保护 > App 覆盖 > 全局。
 static NSDictionary *SIO_appOverride(NSDictionary *root) {
-    if (![root isKindOfClass:[NSDictionary class]]) return nil;
-    id ov = root[@"AppOverrides"];
-    if (![ov isKindOfClass:[NSDictionary class]]) return nil;
     NSString *bid = SIO_bundleID();
     if (!bid.length) return nil;
-    id mine = ((NSDictionary *)ov)[bid];
-    return [mine isKindOfClass:[NSDictionary class]] ? (NSDictionary *)mine : nil;
+
+    // ---- v2.5.8-3APP：plist 用户配置优先 ----
+    // 用户在配置 App 里为某个 bid 显式写过的专属覆盖，永远以用户为准。
+    if ([root isKindOfClass:[NSDictionary class]]) {
+        id ov = root[@"AppOverrides"];
+        if ([ov isKindOfClass:[NSDictionary class]]) {
+            id mine = ((NSDictionary *)ov)[bid];
+            if ([mine isKindOfClass:[NSDictionary class]]) return (NSDictionary *)mine;
+        }
+    }
+
+    // ---- v2.5.8-3APP：内置三 App 加速表（无需 plist，装上即生效）----
+    // 只加速动画时长相关维度；不动已被实测证明必须保留的保护
+    // （顺丰的原生滚动惯性、微信的手感/HUD 保护由 gSelfFeelProtected/gSelfHudProtected
+    //  独立控制，这里不写 FastScroll/FastTap/HUDFast 的强制值，避免破坏其长按复制与列表惯性）。
+    static NSDictionary *builtin = nil;
+    static dispatch_once_t onceBuiltin;
+    dispatch_once(&onceBuiltin, ^{
+        NSDictionary *full = @{
+            @"Enabled":            @YES,
+            @"Mode":               @0,     // 加速模式
+            @"Speed":              @45.0,  // 动画时长加速倍率（范围上限 50）
+            @"Spring":             @YES,   // 弹簧物理参数同步缩放
+            @"Extra":              @YES,   // 导航/模态进阶转场
+            @"ListAccel":          @YES,   // TV/CV 列表动画
+            @"ZoomAccel":          @YES,   // 缩放动画
+            @"LayerBoost":         @6.0,   // 显式动画/转圈额外倍率
+            @"FloorDuration":      @0.006, // 下限 6ms
+            @"TransitionBoost":    @3.0,   // 转场独立倍率
+            @"WKFastShow":         @YES,   // WKWebView 显示加速
+            @"InstantTransition":  @YES,   // 极速瞬切
+        };
+        builtin = @{
+            @"com.ss.iphone.ugc.Aweme": full,  // 抖音
+            @"com.tencent.xin":         full,  // 微信
+            @"com.sfic.knight":         full,  // 顺丰同城骑士
+        };
+    });
+    id b = builtin[bid];
+    return [b isKindOfClass:[NSDictionary class]] ? (NSDictionary *)b : nil;
 }
 
 // v2.1.19（名单外置）：三份保护名单的「用户额外」部分，plist 可配置、reload 时更新。
