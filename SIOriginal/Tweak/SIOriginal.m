@@ -627,6 +627,12 @@ static double   gInvListS   = 0.0;
 static double   gInvWebS    = 0.0;
 static double   gFloorCached = 0.005;
 static BOOL     gBlockedFast = NO;
+// v2.5.8：全局「无需缩放」快路径。gEnabled 但倍率实际没放大时（Speed≤1 且
+// LayerBoost≤1），所有动画 hook 换算出来等于原值，却仍要付 association 查询、
+// 类判断、CATransaction 键比较的代价。SwiftUI 每个图层属性变更都会走
+// -[CALayer actionForKey:]，这些开销在 ProMotion 下会累积成可观的 CPU（发热/掉帧）。
+// 该布尔在 SIO_recalc 里预计算，热路径只多一次分支。
+static BOOL     gFastNoop = NO;
 static BOOL     gIsWeChat  = NO;
 // v1.8.12：黑名单在重载时一次性解析成本进程布尔值，热路径零分配（见 SIO_reload）
 static BOOL     gSelfBlacklisted = NO;
@@ -1016,6 +1022,11 @@ static void SIO_recalc(void) {
     gInvListS    = (gSpeedList  > 1.0001) ? (1.0 / gSpeedList)  : 0.0;
     gInvWebS     = (gSpeedWeb   > 1.0001) ? (1.0 / gSpeedWeb)   : 0.0;
     gBlockedFast = (!gEnabled || gSelfBlacklisted);
+    // v2.5.8：加速模式下倍率未放大（≤1）且没有额外 LayerBoost 时，任何动画换算都
+    // 是恒等变换 —— 直接走快路径，不再做关联对象/类判断。慢放/瞬切仍需处理。
+    gFastNoop = (!gEnabled) ||
+                (gMode == 0 && gSpeed <= 1.0001 && gLayerBoost <= 1.0001 &&
+                 gSpeedTrans < 1.0 && gSpeedList < 1.0 && gSpeedWeb < 1.0);
 }
 
 // v2.1.11：配置缺失/损坏时的统一复位表。
@@ -2115,7 +2126,8 @@ static void   (*o_MBHUDHide)(id, SEL, BOOL);                            // -MBPr
 static void sio_CAAnim_setDuration(id self, SEL _cmd, double d) {
     SIO_HIT(SIO_HIT_CAANIM);
     SIO_REQUIRE_ORIG(o_CAAnim_setDuration);
-    if (SIO_blocked()) { o_CAAnim_setDuration(self, _cmd, d); return; }
+    // v2.5.8：倍率未生效时连关联表都不碰（显式动画数量通常远小于隐式动作）
+    if (gFastNoop || SIO_blocked()) { o_CAAnim_setDuration(self, _cmd, d); return; }
     // v2.1.7 fix + v2.1.8 opt：CAKeyframeAnimation 用 0.05s 下限加速。
     // 比普通动画的 0.005s 慢（保证渲染），但比地图黑屏修复时的 0.1s 快一倍。
     if ([self isKindOfClass:[CAKeyframeAnimation class]]) {
@@ -2148,7 +2160,7 @@ static __thread int sioInCTDur = 0;
 static void sio_CATransaction_setDur(id self, SEL _cmd, double d) {
     SIO_HIT(SIO_HIT_CATX);
     SIO_REQUIRE_ORIG(o_CATransaction_setDur);
-    if (SIO_inUIViewAnim() || SIO_blocked() || sioInCTDur) {
+    if (gFastNoop || SIO_inUIViewAnim() || SIO_blocked() || sioInCTDur) {
         o_CATransaction_setDur(self, _cmd, d);
         return;
     }
@@ -2177,9 +2189,8 @@ static void (*o_CAgroup_setAnimations)(id, SEL, NSArray *);
 // ③ +[CATransaction setValue:forKey:]
 static void sio_CT_setValueForKey(id self, SEL _cmd, id value, NSString *key) {
     SIO_REQUIRE_ORIG(o_CT_setValueForKey);
-    // kCATransactionAnimationDuration 的字面值就是 @"animationDuration"；
-    // disableActions / timingFunction 等其它键原样放行。
-    if (SIO_blocked() || sioInCTDur || ![key isEqualToString:@"animationDuration"]) {
+    // v2.5.8：倍率未生效时不做字符串比较（CATransaction 每次 begin/commit 都会调这里）
+    if (gFastNoop || SIO_blocked() || sioInCTDur || ![key isEqualToString:@"animationDuration"]) {
         o_CT_setValueForKey(self, _cmd, value, key);
         return;
     }
@@ -2198,8 +2209,13 @@ static void sio_CT_setValueForKey(id self, SEL _cmd, id value, NSString *key) {
 // ② -[CALayer actionForKey:]，隐式动画入口
 static id sio_layer_actionForKey(id self, SEL _cmd, NSString *key) {
     SIO_REQUIRE_ORIG_NIL(o_layer_actionForKey);
+    // v2.5.8：两条热路径短路。
+    // ① 倍率未生效时直接放行 —— 这是最省的一次比较；
+    // ② 处在 UIView 块动画里时放行 —— 块动画的时长已由 ① 压缩，隐式动作会跟随
+    //    事务时长（duration = 0），再走一遍只会多一次关联表加锁，没有任何收益。
+    if (gFastNoop) return o_layer_actionForKey(self, _cmd, key);
     id action = o_layer_actionForKey(self, _cmd, key);
-    if (!action || SIO_blocked()) return action;
+    if (!action || SIO_inUIViewAnim() || SIO_blocked()) return action;
     if (![action isKindOfClass:[CAAnimation class]]) return action;   // NSNull / 自定义动作放行
     CAAnimation *anim = (CAAnimation *)action;
     if (SIO_animScaled(anim) || !o_CAAnim_setDuration) return anim;
@@ -2217,7 +2233,7 @@ static id sio_layer_actionForKey(id self, SEL _cmd, NSString *key) {
 // 子动画若在 hook 安装前就设过时长，setDuration: 不会再被调用，这里补一次。
 static void sio_CAgroup_setAnimations(id self, SEL _cmd, NSArray *anims) {
     SIO_REQUIRE_ORIG(o_CAgroup_setAnimations);
-    if (SIO_blocked() || anims.count == 0 || !o_CAAnim_setDuration) {
+    if (gFastNoop || SIO_blocked() || anims.count == 0 || !o_CAAnim_setDuration) {
         o_CAgroup_setAnimations(self, _cmd, anims);
         return;
     }
@@ -2832,9 +2848,11 @@ static void sio_WKdeferHide(id wv, int attempt) {
     // v2.5.2：Web 场景倍率作用于「首帧轮询间隔」。缺省 0.25s（与旧行为一致）；
     // 设置 SpeedWeb 后按同一倍率缩短，最小 0.02s —— 再短就不是轮询而是忙等了。
     double poll = 0.25;
+    // v2.5.8：下限从 0.02s 提到 0.05s。x40 档时 8 次重试会被压成约 50ms 的高频轮询，
+    // 属于「CPU 空转换首帧」；0.05s 已能在多数页面上赶在首帧前完成，代价可忽略。
     if (gEnabled && gMode != 1 && gInvWebS > 0.0) {
         poll = 0.25 * gInvWebS;
-        if (poll < 0.02) poll = 0.02;
+        if (poll < 0.05) poll = 0.05;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(poll * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
@@ -4179,6 +4197,14 @@ static void _fbg_watchdogStart(void) {
     // 后台保活本身就是耗电项，低电量时最不需要它频繁唤醒主线程。
     BOOL lowPower = NO;
     @try { lowPower = [NSProcessInfo processInfo].isLowPowerModeEnabled; } @catch (__unused NSException *e) {}
+    // v2.5.8：低电量模式下只保留「场景伪造」，停掉音频保活与自愈轮询。
+    // 静音音频常驻是后台耗电最大的一项；低电量时用户要的是续航，不是保活。
+    if (lowPower && gHasAudioMode) {
+        gUseAudio = NO;
+        _fbg_stopAudio(YES);
+        NSLog(@"[FUBG] low power mode: audio keep-alive disabled (scene spoof kept), watchdog not started");
+        return;
+    }
     NSTimeInterval step = lowPower ? 6.0 : 3.0;
     gWatchdogStep = step;   // v2.3.2：退避按「秒」换算，不再假设固定 3s
     gWatchdog = [NSTimer scheduledTimerWithTimeInterval:step repeats:YES
