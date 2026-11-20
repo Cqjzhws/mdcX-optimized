@@ -59,6 +59,9 @@ jobs:
             ENABLE_SANDBOX=NO \
             ONLY_ACTIVE_ARCH=NO \
             CLEAN_BUILD_FOLDER=YES \
+            STRIP_INSTALLED_PRODUCT=YES \
+            DEPLOYMENT_POSTPROCESSING=YES \
+            OTHER_LDFLAGS='$(inherited) -Wl,-dead_strip' \
             archive 2>&1 | tee build.log
 
           if ! grep -q "ARCHIVE SUCCEEDED" build.log; then
@@ -76,6 +79,25 @@ jobs:
             exit 1
           fi
           echo "Found app: $APP_PATH"
+
+          # -----------------------------------------------------------
+          # v2.6.1 精简：在签名之前剥离调试符号与非全局符号。
+          #   -S 去掉调试信息（Release 归档一般已无，保留是保险）
+          #   -x 去掉局部符号；C 导出符号与 ObjC/Swift 元数据不受影响，
+          #      TrollStore 安装时的重签也不依赖它们。
+          #   顺序很关键：先 strip、后 codesign，否则签名立刻失效。
+          # -----------------------------------------------------------
+          BIN="$APP_PATH/mdcX"
+          SIZE_BEFORE=$(stat -f%z "$BIN")
+          strip -x -S "$BIN" 2>&1 || echo "strip warning (non-fatal)"
+          SIZE_AFTER=$(stat -f%z "$BIN")
+          echo "main binary: ${SIZE_BEFORE} -> ${SIZE_AFTER} bytes"
+
+          # 归档/资源拷贝可能带入的调试与冗余文件
+          find "$APP_PATH" -name "*.dSYM" -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$APP_PATH" -name ".DS_Store" -delete 2>/dev/null || true
+          find "$APP_PATH" -name "*.map" -delete 2>/dev/null || true
+          find "$APP_PATH" -name "*.swiftmodule" -prune -exec rm -rf {} + 2>/dev/null || true
 
           # -----------------------------------------------------------
           # 注入 TrollStore 特权 entitlements（关键！）
@@ -132,6 +154,8 @@ jobs:
 
           HELPER_ENT="${GITHUB_WORKSPACE}/FUCleanHelper.entitlements"
           plutil -lint "$HELPER_ENT"
+          # v2.6.1：辅助工具同样剥局部符号（体积小，但顺手）
+          strip -x "$APP_PATH/Helpers/fuclean-helper" 2>&1 || true
           codesign --force --sign - --entitlements "$HELPER_ENT" \
             "$APP_PATH/Helpers/fuclean-helper"
           chmod 755 "$APP_PATH/Helpers/fuclean-helper"
@@ -151,6 +175,9 @@ jobs:
           echo "Packing IPA manually..."
           mkdir -p build/ipa/Payload
           cp -R "$APP_PATH" build/ipa/Payload/
+          # v2.6.1：打包前再清一次，确保 Payload 内无调试残留
+          find build/ipa/Payload -name ".DS_Store" -delete 2>/dev/null || true
+          find build/ipa/Payload -name "*.dSYM" -prune -exec rm -rf {} + 2>/dev/null || true
           cd build/ipa
           IPA_NAME="mdcX_Max_v${APP_VERSION}.ipa"
           zip -qr "$IPA_NAME" Payload -x "*.DS_Store"
