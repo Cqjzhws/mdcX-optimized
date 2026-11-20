@@ -3715,7 +3715,11 @@ static BOOL SIOColorIsRed(UIColor *c) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    [self doCheck];
+    // v2.6.0：自检报告本来同步生成 —— 读 plist、拼 6KB 文本、再让 UITextView 排版，
+    // 全压在切页动画那一帧上。改为下一帧再做，切页先顺出去。
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.isViewLoaded && self.view.window) [self doCheck];
+    });
 }
 
 - (void)doRespring {
@@ -4159,9 +4163,25 @@ UIViewController *MXCreateJisuRootVC(void) {
     SIOAdvancedVC *a = [[SIOAdvancedVC alloc] init];
     a.model = model; a.title = @"高级";
 
-    for (UIViewController *vc in @[e,f,s,a]) [vc loadViewIfNeeded];
+    // v2.6.0：启动精简 —— 原来四页一次性 loadViewIfNeeded，等于在首帧前解析 5 遍 plist、
+    // 建 80+ 个玻璃层与几百条 Auto Layout 约束，低端机首屏明显卡一下。
+    // 现在只同步构建首屏「引擎」页，其余三页分帧补齐（每帧一页），
+    // 全部就绪后再统一回填控件值，保存逻辑不受影响。
+    [e loadViewIfNeeded];
     [model loadControlValues];
     [e refreshHeader];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [f loadViewIfNeeded];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [s loadViewIfNeeded];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [a loadViewIfNeeded];
+                // 后三页的控件此刻才存在，统一回填一次
+                [model loadControlValues];
+                [e refreshHeader];
+            });
+        });
+    });
 
     UINavigationController *(^nav)(UIViewController *) =
         ^(UIViewController *vc) {
